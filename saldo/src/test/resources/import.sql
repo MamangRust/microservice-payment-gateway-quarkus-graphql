@@ -1,0 +1,2 @@
+-- Saldo module test data
+-- Entity tables are auto-created by Hibernate (saldos)

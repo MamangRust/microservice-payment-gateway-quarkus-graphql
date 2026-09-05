@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: payment-gateway
+
+resources:
+  - ../../base
+  - dns-egress.yaml
+  - email-smtp-egress.yaml
+
+images:
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/gateway
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/auth
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/user
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/role
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/card
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/merchant
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/saldo
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/topup
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/transaction
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/transfer
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/withdraw
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/email-service
+    newTag: latest
+
+# GHCR image owner templating.
+#
+# The base manifests reference images as ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/<svc>.
+# The `images` block above matches that placeholder (so newTag is pinned here),
+# and this `replacements` block substitutes the real owner (from the app-config
+# ConfigMap key GHCR_OWNER) into the <owner> segment of each image field.
+# GHCR_OWNER must match github.repository_owner (lowercase) of the repository
+# whose CI pushes to ghcr.io/<owner>/monolith-payment-gateway-grpc-quarkus/... —
+# on a fork, only this ConfigMap value needs to change.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: app-config
+      fieldPath: data.GHCR_OWNER
+    targets:
+      - select:
+          kind: Deployment
+          name: "^(gateway|auth|user|role|card|merchant|saldo|topup|transaction|transfer|withdraw|email-service)$"
+        fieldPaths:
+          - spec.template.spec.containers.0.image
+        options:
+          delimiter: "/"
+          index: 1
+patches:
+  - path: workload-wave.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "^(gateway|auth|user|role|card|merchant|saldo|topup|transaction|transfer|withdraw|email-service)$"

@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package pb.card;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "common/api.proto";
+
+message GetStatementRequest {
+  string card_number = 1;
+  google.protobuf.Timestamp statement_date = 2;
+}
+
+message GetStatementsByCardRequest {
+  string card_number = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message TriggerBillingCycleRequest {
+  int32 billing_cycle_day = 1;
+}
+
+message BillingStatementResponse {
+  int32 id = 1;
+  string card_number = 2;
+  int32 billing_cycle_day = 3;
+  double opening_balance = 4;
+  double closing_balance = 5;
+  double minimum_payment = 6;
+  string due_date = 7;
+  double fees = 8;
+  double interest = 9;
+  string statement_date = 10;
+  string status = 11;
+  string created_at = 12;
+  string updated_at = 13;
+}
+
+message ApiResponseBillingStatement {
+  string status = 1;
+  string message = 2;
+  BillingStatementResponse data = 3;
+}
+
+message ApiResponsePaginationBillingStatement {
+  string status = 1;
+  string message = 2;
+  repeated BillingStatementResponse data = 3;
+  pb.common.PaginationMeta pagination_meta = 4;
+}
+
+service CardBillingService {
+  rpc TriggerBillingCycle(TriggerBillingCycleRequest) returns (ApiResponseBillingStatement) {}
+  rpc GetStatement(GetStatementRequest) returns (ApiResponseBillingStatement) {}
+  rpc GetStatementsByCard(GetStatementsByCardRequest) returns (ApiResponsePaginationBillingStatement) {}
+}

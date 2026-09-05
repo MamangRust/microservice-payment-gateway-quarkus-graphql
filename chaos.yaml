@@ -1,0 +1,1172 @@
+warmupDuration: "10s"
+enableDefaultIgnored: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Chaos Engineering — Payment Gateway Platform
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# This file defines chaos injection policies for resilience testing.
+# All policies are hot-reloaded every 5 seconds by ChaosManager.
+#
+# Policy types:
+#   http   — Inject latency/error at REST API gateway level
+#   sql    — Inject latency/error at database query level
+#   grpc   — Inject latency/error at internal gRPC service level
+#   cpu    — Simulate CPU pressure (multicore stress)
+#   memory — Simulate memory leak / pressure
+#   kafka  — Drop/delay/reject messages on specific Kafka topics
+#
+# Kafka chaos targets (19 policies):
+#   Email topics (12): Test email delivery resilience (DLQ, retry, dedup)
+#   Domain topics (7): Test event-driven pipeline integrity
+#     - saldo-service-topic-create-saldo  (balance creation)
+#     - card.txn.created                 (fraud scoring pipeline)
+#     - card.fraud.alert                 (fraud alert audit)
+#     - card.payment.posted              (payment event audit)
+#     - card.statement.generated         (billing cycle audit)
+#
+# Enable/disable: set `enabled: true` on any policy.
+# All policies are `enabled: false` by default.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+policies:
+  # ═══════════════════════════════════════════════
+  # HTTP — REST API (gateway module, /api/*)
+  # ═══════════════════════════════════════════════
+
+  # ── Auth ──────────────────────────────────────
+  - name: "http-auth-login-rate-limit"
+    type: "http"
+    target: "POST:/api/auth/login"
+    enabled: false
+    errorChance: 0.4
+    errorCode: 429
+    errorBody: '{"error":"too_many_requests","message":"Rate limit exceeded by chaos simulation"}'
+    latencyMs: 1000
+
+  - name: "http-auth-login-delay"
+    type: "http"
+    target: "POST:/api/auth/login"
+    enabled: false
+    errorChance: 0.15
+    latencyMs: 2000
+
+  - name: "http-auth-register-error"
+    type: "http"
+    target: "POST:/api/auth/register"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos error on registration"}'
+    latencyMs: 800
+
+  - name: "http-auth-forgot-password-delay"
+    type: "http"
+    target: "POST:/api/auth/forgot-password"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 2000
+
+  - name: "http-auth-refresh-error"
+    type: "http"
+    target: "POST:/api/auth/refresh"
+    enabled: false
+    errorChance: 0.15
+    errorCode: 401
+    errorBody: '{"error":"unauthorized","message":"Simulated chaos token refresh failure"}'
+    latencyMs: 500
+
+  - name: "http-auth-me-timeout"
+    type: "http"
+    target: "GET:/api/auth/me"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 2500
+
+  # ── Users ─────────────────────────────────────
+  - name: "http-user-list-delay"
+    type: "http"
+    target: "GET:/api/users"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-user-create-error"
+    type: "http"
+    target: "POST:/api/users"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos user creation failure"}'
+    latencyMs: 500
+
+  # ── Roles ─────────────────────────────────────
+  - name: "http-role-list-delay"
+    type: "http"
+    target: "GET:/api/roles"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 800
+
+  - name: "http-role-create-error"
+    type: "http"
+    target: "POST:/api/roles"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos role creation failure"}'
+    latencyMs: 500
+
+  # ── Cards ─────────────────────────────────────
+  - name: "http-card-list-delay"
+    type: "http"
+    target: "GET:/api/cards"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-card-create-error"
+    type: "http"
+    target: "POST:/api/cards"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos card creation failure"}'
+    latencyMs: 500
+
+  - name: "http-card-dashboard-delay"
+    type: "http"
+    target: "GET:/api/cards/dashboard"
+    enabled: false
+    errorChance: 0.3
+    latencyMs: 1500
+
+  - name: "http-card-toggle-status-error"
+    type: "http"
+    target: "PUT:/api/cards/*/status"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos card status update failure"}'
+    latencyMs: 500
+
+  - name: "http-card-credit-limit-error"
+    type: "http"
+    target: "PUT:/api/cards/*/credit-limit"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos credit limit update failure"}'
+    latencyMs: 600
+
+  - name: "http-card-redeem-points-error"
+    type: "http"
+    target: "POST:/api/cards/*/redeem"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 502
+    errorBody: '{"error":"bad_gateway","message":"Simulated chaos points redemption failure"}'
+    latencyMs: 800
+
+  # ── Authorization ────────────────────────────────
+  - name: "http-card-authorize-error"
+    type: "http"
+    target: "POST:/api/cards/authorize"
+    enabled: false
+    errorChance: 0.3
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos authorization failure"}'
+    latencyMs: 1000
+
+  - name: "http-card-authorize-timeout"
+    type: "http"
+    target: "POST:/api/cards/authorize"
+    enabled: false
+    errorChance: 0.15
+    latencyMs: 3000
+
+  - name: "http-card-reverse-delay"
+    type: "http"
+    target: "POST:/api/cards/reverse"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos reversal failure"}'
+    latencyMs: 1000
+
+  # ── Billing ─────────────────────────────────────
+  - name: "http-card-billing-trigger-error"
+    type: "http"
+    target: "POST:/api/cards/billing/trigger"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos billing trigger failure"}'
+    latencyMs: 1500
+
+  - name: "http-card-billing-statement-delay"
+    type: "http"
+    target: "GET:/api/cards/billing/statement/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-card-billing-statements-delay"
+    type: "http"
+    target: "GET:/api/cards/billing/statements/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  # ── Payments ────────────────────────────────────
+  - name: "http-card-payment-post-error"
+    type: "http"
+    target: "POST:/api/cards/payments"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 502
+    errorBody: '{"error":"bad_gateway","message":"Simulated chaos payment posting failure"}'
+    latencyMs: 800
+
+  - name: "http-card-payment-history-delay"
+    type: "http"
+    target: "GET:/api/cards/payments/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  # ── Rewards ─────────────────────────────────────
+  - name: "http-card-rewards-balance-delay"
+    type: "http"
+    target: "GET:/api/cards/rewards/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 800
+
+  - name: "http-card-rewards-redeem-error"
+    type: "http"
+    target: "POST:/api/cards/rewards/*/redeem"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos reward redemption failure"}'
+    latencyMs: 600
+
+  # ── Saldos ────────────────────────────────────
+  - name: "http-saldo-list-delay"
+    type: "http"
+    target: "GET:/api/saldos"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-saldo-create-error"
+    type: "http"
+    target: "POST:/api/saldos"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos saldo creation failure"}'
+    latencyMs: 500
+
+  - name: "http-saldo-stats-delay"
+    type: "http"
+    target: "GET:/api/saldos/stats/*"
+    enabled: false
+    errorChance: 0.25
+    latencyMs: 1500
+
+  # ── Topups ────────────────────────────────────
+  - name: "http-topup-list-delay"
+    type: "http"
+    target: "GET:/api/topups"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-topup-create-error"
+    type: "http"
+    target: "POST:/api/topups"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 502
+    errorBody: '{"error":"bad_gateway","message":"Simulated chaos topup failure"}'
+    latencyMs: 800
+
+  - name: "http-topup-stats-delay"
+    type: "http"
+    target: "GET:/api/topups/stats/*"
+    enabled: false
+    errorChance: 0.3
+    latencyMs: 1500
+
+  # ── Transactions ──────────────────────────────
+  - name: "http-transaction-list-delay"
+    type: "http"
+    target: "GET:/api/transactions"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-transaction-create-error"
+    type: "http"
+    target: "POST:/api/transactions"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos transaction failure"}'
+    latencyMs: 800
+
+  - name: "http-transaction-merchant-delay"
+    type: "http"
+    target: "GET:/api/transactions/merchant/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 2000
+
+  # ── Transfers ─────────────────────────────────
+  - name: "http-transfer-create-error"
+    type: "http"
+    target: "POST:/api/transfers"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos transfer failure"}'
+    latencyMs: 1000
+
+  - name: "http-transfer-list-by-card-delay"
+    type: "http"
+    target: "GET:/api/transfers/from/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  # ── Withdraws ─────────────────────────────────
+  - name: "http-withdraw-create-error"
+    type: "http"
+    target: "POST:/api/withdraws"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos withdraw failure"}'
+    latencyMs: 800
+
+  - name: "http-withdraw-list-delay"
+    type: "http"
+    target: "GET:/api/withdraws"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  # ── Merchants ─────────────────────────────────
+  - name: "http-merchant-list-delay"
+    type: "http"
+    target: "GET:/api/merchants"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-merchant-create-error"
+    type: "http"
+    target: "POST:/api/merchants"
+    enabled: false
+    errorChance: 0.25
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos merchant creation failure"}'
+    latencyMs: 500
+
+  - name: "http-merchant-transaction-delay"
+    type: "http"
+    target: "GET:/api/merchants/transactions/*"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 2000
+
+  - name: "http-merchant-stats-delay"
+    type: "http"
+    target: "GET:/api/merchants/stats/*"
+    enabled: false
+    errorChance: 0.25
+    latencyMs: 1500
+
+  # ── Merchant Documents ────────────────────────
+  - name: "http-merchant-document-list-delay"
+    type: "http"
+    target: "GET:/api/merchant-documents"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "http-merchant-document-create-error"
+    type: "http"
+    target: "POST:/api/merchant-documents"
+    enabled: false
+    errorChance: 0.2
+    errorCode: 500
+    errorBody: '{"error":"internal_error","message":"Simulated chaos document upload failure"}'
+    latencyMs: 600
+
+  # ═══════════════════════════════════════════════
+  # SQL — Database table-level chaos
+  # ═══════════════════════════════════════════════
+  - name: "sql-users-deadlock"
+    type: "sql"
+    target: "users"
+    enabled: false
+    errorChance: 0.15
+    errorMessage: "ERROR: deadlock detected (simulated chaos)"
+    latencyMs: 500
+
+  - name: "sql-roles-delay"
+    type: "sql"
+    target: "roles"
+    enabled: false
+    errorChance: 0.15
+    latencyMs: 500
+
+  - name: "sql-user-roles-delay"
+    type: "sql"
+    target: "user_roles"
+    enabled: false
+    errorChance: 0.15
+    latencyMs: 400
+
+  - name: "sql-refresh-tokens-timeout"
+    type: "sql"
+    target: "refresh_tokens"
+    enabled: false
+    errorChance: 0.1
+    latencyMs: 2000
+
+  - name: "sql-reset-tokens-timeout"
+    type: "sql"
+    target: "reset_tokens"
+    enabled: false
+    errorChance: 0.1
+    latencyMs: 2000
+
+  - name: "sql-cards-delay"
+    type: "sql"
+    target: "cards"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 800
+
+  - name: "sql-saldos-delay"
+    type: "sql"
+    target: "saldos"
+    enabled: false
+    errorChance: 0.25
+    latencyMs: 1000
+
+  - name: "sql-topups-error"
+    type: "sql"
+    target: "topups"
+    enabled: false
+    errorChance: 0.2
+    errorMessage: "ERROR: could not serialize access due to concurrent update (simulated)"
+    latencyMs: 700
+
+  - name: "sql-transactions-timeout"
+    type: "sql"
+    target: "transactions"
+    enabled: false
+    errorChance: 0.15
+    errorMessage: "ERROR: query_timeout (simulated chaos)"
+    latencyMs: 1500
+
+  - name: "sql-transfers-delay"
+    type: "sql"
+    target: "transfers"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "sql-withdraws-error"
+    type: "sql"
+    target: "withdraws"
+    enabled: false
+    errorChance: 0.2
+    errorMessage: "ERROR: insufficient balance (simulated)"
+    latencyMs: 600
+
+  - name: "sql-merchants-delay"
+    type: "sql"
+    target: "merchants"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "sql-merchant-documents-delay"
+    type: "sql"
+    target: "merchant_documents"
+    enabled: false
+    errorChance: 0.15
+    latencyMs: 900
+
+  # ── New Card Tables ──────────────────────────
+  - name: "sql-card-auth-transactions-delay"
+    type: "sql"
+    target: "card_auth_transactions"
+    enabled: false
+    errorChance: 0.2
+    errorMessage: "ERROR: authorization timeout (simulated chaos)"
+    latencyMs: 1000
+
+  - name: "sql-billing-statements-error"
+    type: "sql"
+    target: "billing_statements"
+    enabled: false
+    errorChance: 0.15
+    errorMessage: "ERROR: billing cycle deadlock (simulated chaos)"
+    latencyMs: 1200
+
+  - name: "sql-card-payments-delay"
+    type: "sql"
+    target: "card_payments"
+    enabled: false
+    errorChance: 0.2
+    errorMessage: "ERROR: payment processing timeout (simulated)"
+    latencyMs: 1500
+
+  - name: "sql-card-rewards-error"
+    type: "sql"
+    target: "card_rewards"
+    enabled: false
+    errorChance: 0.15
+    errorMessage: "ERROR: reward redemption failure (simulated)"
+    latencyMs: 800
+
+  # ═══════════════════════════════════════════════
+  # gRPC — Internal service-level chaos
+  # ═══════════════════════════════════════════════
+  - name: "grpc-auth-login-unavailable"
+    type: "grpc"
+    target: "pb.AuthService/LoginUser"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated gRPC unavailability for LoginUser"
+    latencyMs: 250
+
+  - name: "grpc-auth-register-timeout"
+    type: "grpc"
+    target: "pb.AuthService/RegisterUser"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated gRPC deadline exceeded for RegisterUser"
+    latencyMs: 3000
+
+  - name: "grpc-auth-verify-delay"
+    type: "grpc"
+    target: "pb.AuthService/VerifyEmail"
+    enabled: false
+    errorChance: 0.15
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated gRPC delay for email verification"
+    latencyMs: 2000
+
+  - name: "grpc-user-query-unavailable"
+    type: "grpc"
+    target: "pb.user.UserQueryService/FindAll"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated gRPC unavailability for UserQuery"
+    latencyMs: 200
+
+  - name: "grpc-user-command-error"
+    type: "grpc"
+    target: "pb.user.UserCommandService/CreateUser"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated user creation failure"
+    latencyMs: 500
+
+  - name: "grpc-role-query-delay"
+    type: "grpc"
+    target: "pb.role.RoleService/FindAll"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated role query unavailability"
+    latencyMs: 800
+
+  - name: "grpc-role-assign-error"
+    type: "grpc"
+    target: "pb.role.RoleCommandService/AssignRoleToUser"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated role assignment failure"
+    latencyMs: 500
+
+  - name: "grpc-card-query-delay"
+    type: "grpc"
+    target: "pb.card.CardQueryService/FindAllCard"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated card query unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-card-command-error"
+    type: "grpc"
+    target: "pb.card.CardCommandService/CreateCard"
+    enabled: false
+    errorChance: 0.3
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated card creation failure"
+    latencyMs: 500
+
+  - name: "grpc-card-dashboard-timeout"
+    type: "grpc"
+    target: "pb.card.CardDashboardService/GetDashboard"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated card dashboard timeout"
+    latencyMs: 3000
+
+  - name: "grpc-card-stats-balance-delay"
+    type: "grpc"
+    target: "pb.card.stats.CardStatsBalanceService/FindMonthlyBalance"
+    enabled: false
+    errorChance: 0.25
+    latencyMs: 1500
+
+  - name: "grpc-card-stats-topup-timeout"
+    type: "grpc"
+    target: "pb.card.stats.CardStatsTopupService/FindMonthlyTopup"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated card stats topup timeout"
+    latencyMs: 2500
+
+  - name: "grpc-card-stats-transaction-delay"
+    type: "grpc"
+    target: "pb.card.stats.CardStatsTransactionService/FindMonthlyTransaction"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1500
+
+  - name: "grpc-card-stats-transfer-delay"
+    type: "grpc"
+    target: "pb.card.stats.CardStatsTransferService/FindMonthlyTransfer"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1500
+
+  - name: "grpc-card-stats-withdraw-delay"
+    type: "grpc"
+    target: "pb.card.stats.CardStatsWithdrawService/FindMonthlyWithdraw"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1500
+
+  # ── New Card gRPC Services ────────────────────
+  - name: "grpc-card-authorization-error"
+    type: "grpc"
+    target: "pb.card.CardAuthorizationService/Authorize"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "ABORTED"
+    errorMessage: "Simulated card authorization failure"
+    latencyMs: 800
+
+  - name: "grpc-card-authorization-timeout"
+    type: "grpc"
+    target: "pb.card.CardAuthorizationService/Authorize"
+    enabled: false
+    errorChance: 0.15
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated card authorization timeout"
+    latencyMs: 3000
+
+  - name: "grpc-card-reverse-delay"
+    type: "grpc"
+    target: "pb.card.CardAuthorizationService/Reverse"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated card reversal unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-card-billing-cycle-error"
+    type: "grpc"
+    target: "pb.card.CardBillingService/TriggerBillingCycle"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated billing cycle trigger failure"
+    latencyMs: 1500
+
+  - name: "grpc-card-billing-statement-delay"
+    type: "grpc"
+    target: "pb.card.CardBillingService/GetStatement"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated billing statement query unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-card-payment-post-error"
+    type: "grpc"
+    target: "pb.card.CardPaymentService/PostPayment"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "ABORTED"
+    errorMessage: "Simulated card payment post failure"
+    latencyMs: 800
+
+  - name: "grpc-card-payment-history-delay"
+    type: "grpc"
+    target: "pb.card.CardPaymentService/GetPaymentHistory"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated payment history query unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-card-payment-count-timeout"
+    type: "grpc"
+    target: "pb.card.CardPaymentService/CountPayments"
+    enabled: false
+    errorChance: 0.15
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated payment count timeout"
+    latencyMs: 2000
+
+  - name: "grpc-saldo-query-timeout"
+    type: "grpc"
+    target: "pb.saldo.SaldoQueryService/FindByCardNumber"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated saldo query timeout"
+    latencyMs: 2500
+
+  - name: "grpc-saldo-command-error"
+    type: "grpc"
+    target: "pb.saldo.SaldoCommandService/UpdateSaldoBalance"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated saldo balance update failure"
+    latencyMs: 400
+
+  - name: "grpc-saldo-stats-balance-delay"
+    type: "grpc"
+    target: "pb.saldo.stats.SaldoStatsBalanceService/FindMonthlyBalance"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "grpc-saldo-stats-total-delay"
+    type: "grpc"
+    target: "pb.saldo.stats.SaldoStatsTotalService/FindMonthlyTotal"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "grpc-topup-query-delay"
+    type: "grpc"
+    target: "pb.topup.TopupQueryService/FindAllTopup"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated topup query unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-topup-command-error"
+    type: "grpc"
+    target: "pb.topup.TopupCommandService/CreateTopup"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "ABORTED"
+    errorMessage: "Simulated topup creation aborted"
+    latencyMs: 800
+
+  - name: "grpc-topup-stats-amount-delay"
+    type: "grpc"
+    target: "pb.topup.stats.TopupStatsAmountService/FindMonthlyAmount"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "grpc-topup-stats-method-delay"
+    type: "grpc"
+    target: "pb.topup.stats.TopupStatsMethodService/FindMonthlyMethod"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "grpc-topup-stats-status-delay"
+    type: "grpc"
+    target: "pb.topup.stats.TopupStatsStatusService/FindMonthlySuccess"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1000
+
+  - name: "grpc-transaction-create-error"
+    type: "grpc"
+    target: "pb.transaction.TransactionCommandService/CreateTransaction"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "ABORTED"
+    errorMessage: "Simulated transaction creation aborted"
+    latencyMs: 800
+
+  - name: "grpc-transaction-query-delay"
+    type: "grpc"
+    target: "pb.transaction.TransactionQueryService/FindAllTransaction"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated transaction query unavailability"
+    latencyMs: 1000
+
+  - name: "grpc-transaction-merchant-timeout"
+    type: "grpc"
+    target: "pb.merchant.MerchantTransactionService/FindAllTransactionMerchant"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated merchant transaction query timeout"
+    latencyMs: 2000
+
+  - name: "grpc-transfer-create-timeout"
+    type: "grpc"
+    target: "pb.transfer.TransferCommandService/CreateTransfer"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "DEADLINE_EXCEEDED"
+    errorMessage: "Simulated transfer creation timeout"
+    latencyMs: 3000
+
+  - name: "grpc-transfer-query-delay"
+    type: "grpc"
+    target: "pb.transfer.TransferQueryService/FindAllTransfer"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated transfer query unavailability"
+    latencyMs: 800
+
+  - name: "grpc-withdraw-command-error"
+    type: "grpc"
+    target: "pb.withdraw.WithdrawCommandService/CreateWithdraw"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated withdraw creation failure"
+    latencyMs: 800
+
+  - name: "grpc-withdraw-query-delay"
+    type: "grpc"
+    target: "pb.withdraw.WithdrawQueryService/FindAllWithdraw"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated withdraw query unavailability"
+    latencyMs: 800
+
+  - name: "grpc-merchant-query-unavailable"
+    type: "grpc"
+    target: "pb.merchant.MerchantQueryService/FindAllMerchant"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated merchant query unavailability"
+    latencyMs: 300
+
+  - name: "grpc-merchant-command-error"
+    type: "grpc"
+    target: "pb.merchant.MerchantCommandService/CreateMerchant"
+    enabled: false
+    errorChance: 0.25
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated merchant creation failure"
+    latencyMs: 500
+
+  - name: "grpc-merchant-stats-amount-delay"
+    type: "grpc"
+    target: "pb.merchant.stats.MerchantStatsAmountService/FindMonthlyAmount"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1500
+
+  - name: "grpc-merchant-stats-method-delay"
+    type: "grpc"
+    target: "pb.merchant.stats.MerchantStatsMethodService/FindMonthlyMethod"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "grpc-merchant-stats-total-delay"
+    type: "grpc"
+    target: "pb.merchant.stats.MerchantStatsTotalAmountService/FindMonthlyTotalAmount"
+    enabled: false
+    errorChance: 0.2
+    latencyMs: 1200
+
+  - name: "grpc-merchant-document-query-delay"
+    type: "grpc"
+    target: "pb.merchant_document.MerchantDocumentQueryService/FindAllMerchantDocument"
+    enabled: false
+    errorChance: 0.15
+    grpcStatus: "UNAVAILABLE"
+    errorMessage: "Simulated merchant document query unavailability"
+    latencyMs: 800
+
+  - name: "grpc-merchant-document-command-error"
+    type: "grpc"
+    target: "pb.merchant_document.MerchantDocumentCommandService/CreateMerchantDocument"
+    enabled: false
+    errorChance: 0.2
+    grpcStatus: "INTERNAL"
+    errorMessage: "Simulated merchant document creation failure"
+    latencyMs: 600
+
+  # ═══════════════════════════════════════════════
+  # Infrastructure — CPU / Memory pressure
+  # ═══════════════════════════════════════════════
+  - name: "cpu-pressure-test"
+    type: "cpu"
+    enabled: false
+    cpuCores: 2
+    duration: "2m"
+
+  - name: "memory-leak-test"
+    type: "memory"
+    enabled: false
+    memoryMb: 100
+    duration: "2m"
+
+  # ═══════════════════════════════════════════════
+  # Kafka — Message drop / delay per topic
+  # ═══════════════════════════════════════════════
+  #
+  # These policies target Kafka producers via ChaosManager.evaluate("kafka", topic).
+  # Supported actions:
+  #   dropMessage: true    — Silently drop the message (not sent to broker)
+  #   rejectMessage: true  — Throw exception (producer-side error)
+  #   latencyMs: <N>       — Add artificial delay before publish
+  #
+  # Consumer-side resilience:
+  #   EmailService: manual commit, DLQ on exhausted retries, process-local dedup
+  #   SaldoConsumer: at-least-once + idempotency key
+  #   FraudScoringConsumer: auto-commit + re-scoring
+  #   CardEventLogConsumer: find-before-insert dedup + partial unique index
+  #
+  # Topics: email-service-topic-* (12 email topics)
+  #         saldo-service-topic-create-saldo (balance creation)
+  #         card.txn.created, card.fraud.alert, card.payment.posted, card.statement.generated
+  # ═══════════════════════════════════════════════
+
+  # ── Email Topics: Auth ──────────────────────────
+  # Tests: registration email delivery, OTP flow resilience
+  - name: "kafka-auth-register-drop"  # Drop → user registers but never gets email
+    type: "kafka"
+    target: "email-service-topic-auth-register"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 200
+
+  # Tests: password reset email latency, consumer timeout handling
+  - name: "kafka-auth-forgot-password-delay"
+    type: "kafka"
+    target: "email-service-topic-auth-forgot-password"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1500  # Delay → email arrives late, user retries
+
+  # Tests: verification success email latency (consumer-only topic)
+  - name: "kafka-auth-verify-code-success-delay"
+    type: "kafka"
+    target: "email-service-topic-auth-verify-code-success"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1000
+
+  # ── Email Topics: Financial Operations ─────────
+  # Tests: email delivery for financial events, DLQ trigger on drop
+  # Drop → topup confirmation email never sent
+  - name: "kafka-topup-create-drop"
+    type: "kafka"
+    target: "email-service-topic-topup-create"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 300
+
+  # Delay → transaction notification email arrives late
+  - name: "kafka-transaction-create-delay"
+    type: "kafka"
+    target: "email-service-topic-transaction-create"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 2000
+
+  # Drop → transfer confirmation email never sent
+  - name: "kafka-transfer-create-drop"
+    type: "kafka"
+    target: "email-service-topic-transfer-create"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 400
+
+  # Delay → withdrawal notification email arrives late
+  - name: "kafka-withdraw-create-delay"
+    type: "kafka"
+    target: "email-service-topic-withdraw-create"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1000
+
+  # ── Domain Topics: Balance & Saldo ─────────────
+  # Tests: balance creation pipeline, idempotency, duplicate prevention
+  # Reject → producer throws exception, saldo consumer never creates balance
+  - name: "kafka-saldo-create-reject"
+    type: "kafka"
+    target: "saldo-service-topic-create-saldo"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: true
+    latencyMs: 300
+
+  # Delay → saldo creation email notification arrives late
+  - name: "kafka-saldo-create-email-delay"
+    type: "kafka"
+    target: "email-service-topic-saldo-create"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1200
+
+  # ── Email Topics: Merchant ─────────────────────
+  # Tests: merchant onboarding email flow
+  # Drop → merchant welcome email never sent
+  - name: "kafka-merchant-create-drop"
+    type: "kafka"
+    target: "email-service-topic-merchant-create"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 300
+
+  # Delay → merchant status change notification email arrives late
+  - name: "kafka-merchant-update-status-delay"
+    type: "kafka"
+    target: "email-service-topic-merchant-update-status"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1000
+
+  # Drop → merchant document upload confirmation email never sent
+  - name: "kafka-merchant-document-create-drop"
+    type: "kafka"
+    target: "email-service-topic-merchant-document-create"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 300
+
+  # Delay → merchant document status update email arrives late
+  - name: "kafka-merchant-document-update-status-delay"
+    type: "kafka"
+    target: "email-service-topic-merchant-document-update-status"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1000
+
+  # ── Domain Topics: Card Audit Pipeline ──────────
+  # Tests: fraud scoring pipeline, event audit trail, card blocking
+  # card.txn.created: AuthService → FraudScoringConsumer → card_event_logs
+  # card.fraud.alert: FraudScoringConsumer → CardEventLogConsumer → card_event_logs
+  # card.payment.posted: CardPaymentService → CardEventLogConsumer → card_event_logs
+  # card.statement.generated: BillingEngineService → CardEventLogConsumer → card_event_logs
+
+  # Drop → fraud scoring consumer never re-scores, high-risk txn may not be blocked async
+  - name: "kafka-card-txn-created-drop"
+    type: "kafka"
+    target: "card.txn.created"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 200
+
+  # Delay → async re-scoring happens later, audit trail delayed
+  - name: "kafka-card-txn-created-delay"
+    type: "kafka"
+    target: "card.txn.created"
+    enabled: false
+    errorChance: 0.25
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 2000
+
+  # Drop → fraud alert never reaches audit trail (card_event_logs)
+  - name: "kafka-card-fraud-alert-drop"
+    type: "kafka"
+    target: "card.fraud.alert"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 100
+
+  # Drop → billing statement event never reaches audit trail
+  - name: "kafka-card-statement-generated-drop"
+    type: "kafka"
+    target: "card.statement.generated"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 200
+
+  # Delay → payment event audit trail delayed
+  - name: "kafka-card-payment-posted-delay"
+    type: "kafka"
+    target: "card.payment.posted"
+    enabled: false
+    errorChance: 0.2
+    dropMessage: false
+    rejectMessage: false
+    latencyMs: 1500
+
+  # Drop → payment event never reaches audit trail
+  - name: "kafka-card-payment-posted-drop"
+    type: "kafka"
+    target: "card.payment.posted"
+    enabled: false
+    errorChance: 0.15
+    dropMessage: true
+    rejectMessage: false
+    latencyMs: 200

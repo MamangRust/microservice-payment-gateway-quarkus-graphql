@@ -1,0 +1,17 @@
+-- payment_identity sequences: Hibernate PanacheEntity default id generation
+-- uses SEQUENCE {table}_SEQ with allocationSize = 50. Schema validation
+-- requires every entity table sequence to exist with INCREMENT BY 50.
+ALTER SEQUENCE IF EXISTS users_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS users_seq INCREMENT BY 50 START WITH 1;
+
+ALTER SEQUENCE IF EXISTS roles_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS roles_seq INCREMENT BY 50 START WITH 1;
+
+ALTER SEQUENCE IF EXISTS refresh_tokens_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS refresh_tokens_seq INCREMENT BY 50 START WITH 1;
+
+ALTER SEQUENCE IF EXISTS reset_tokens_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS reset_tokens_seq INCREMENT BY 50 START WITH 1;
+
+ALTER SEQUENCE IF EXISTS user_roles_seq INCREMENT BY 50;
+CREATE SEQUENCE IF NOT EXISTS user_roles_seq INCREMENT BY 50 START WITH 1;

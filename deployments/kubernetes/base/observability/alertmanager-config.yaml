@@ -1,0 +1,18 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-config
+  namespace: payment-gateway
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: payment-gateway-secrets
+    kind: ClusterSecretStore
+  target:
+    name: alertmanager-config
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: alertmanager.yml
+      remoteRef:
+        key: payment-gateway/ALERTMANAGER_CONFIG

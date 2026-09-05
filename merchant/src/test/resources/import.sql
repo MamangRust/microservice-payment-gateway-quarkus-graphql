@@ -1,0 +1,2 @@
+-- Merchant module test data
+-- Entity tables are auto-created by Hibernate (merchants, merchant_documents)

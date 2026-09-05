@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: payment-gateway
+
+resources:
+- common/
+- postgres/
+- pgbouncer/
+- redis/
+- kafka/
+- gateway/
+- auth/
+- user/
+- role/
+- card/
+- merchant/
+- saldo/
+- topup/
+- transaction/
+- transfer/
+- withdraw/
+- email-service/
+- nginx/
+- observability/
+
+patches:
+- path: image-pull-secret-patch.yaml
+  target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: "^(gateway|auth|user|role|card|merchant|saldo|topup|transaction|transfer|withdraw|email-service|nginx|redis-cluster)$"

@@ -1,0 +1,995 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: DRAGON
+      POSTGRES_PASSWORD: DRAGON
+      POSTGRES_DB: PAYMENT_GATEWAY
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=1000"
+      - "-c"
+      - "shared_buffers=4GB"
+      - "-c"
+      - "effective_cache_size=12GB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=32MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "max_worker_processes=8"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_workers=8"
+      - "-c"
+      - "max_parallel_maintenance_workers=4"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_line_prefix=%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h "
+      - "-c"
+      - "superuser_reserved_connections=10"
+      - "-c"
+      - "idle_in_transaction_session_timeout=60000"
+      - "-c"
+      - "statement_timeout=30000"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U DRAGON -d PAYMENT_GATEWAY"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres_exporter
+    restart: unless-stopped
+
+    environment:
+      DATA_SOURCE_NAME: "postgresql://DRAGON:DRAGON@postgres:5432/PAYMENT_GATEWAY?sslmode=disable&connect_timeout=10"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: "true"
+      PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
+      PG_EXPORTER_DISABLE_SETTINGS_METRICS: "false"
+
+    ports:
+      - "9187:9187"
+
+    depends_on:
+      - postgres
+
+    networks:
+      - app_network
+
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer_debug
+    restart: unless-stopped
+
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: DRAGON
+      DB_PASSWORD: DRAGON
+      DB_NAME: PAYMENT_GATEWAY
+
+      AUTH_TYPE: scram-sha-256
+
+      POOL_MODE: transaction
+
+      DEFAULT_POOL_SIZE: 200
+      MIN_POOL_SIZE: 50
+      MAX_DB_CONNECTIONS: 800
+      MAX_CLIENT_CONN: 10000
+      RESERVE_POOL_SIZE: 100
+      RESERVE_POOL_TIMEOUT: 5
+
+      SERVER_IDLE_TIMEOUT: 600
+      QUERY_TIMEOUT: 30
+      SERVER_CONNECT_TIMEOUT: 10
+      SERVER_LOGIN_RETRY: 5
+
+      SERVER_RESET_QUERY: DISCARD ALL
+      SERVER_RESET_QUERY_ALWAYS: 0
+
+      TCP_KEEPALIVE: 1
+      TCP_KEEPCNT: 5
+      TCP_KEEPIDLE: 30
+      TCP_KEEPINTVL: 10
+
+      ADMIN_USERS: DRAGON
+      STATS_USERS: DRAGON
+
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+      LOG_POOLER_ERRORS: 1
+
+    ports:
+      - "6432:5432"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - app_network
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=DRAGON psql -h localhost -p 5432 -U DRAGON -d pgbouncer -c 'SHOW POOLS;' || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  pyroscope:
+    image: grafana/pyroscope:latest
+    ports:
+      - 4040:4040
+    networks:
+      - app_network
+
+  redis-node-1:
+    image: redis:7.4
+    container_name: redis_node_1
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_node_1_data:/data
+    networks:
+      - app_network
+
+  redis-node-2:
+    image: redis:7.4
+    container_name: redis_node_2
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_node_2_data:/data
+    networks:
+      - app_network
+
+  redis-node-3:
+    image: redis:7.4
+    container_name: redis_node_3
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_node_3_data:/data
+    networks:
+      - app_network
+
+  redis-node-4:
+    image: redis:7.4
+    container_name: redis_node_4
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6382:6379"
+    volumes:
+      - redis_node_4_data:/data
+    networks:
+      - app_network
+
+  redis-node-5:
+    image: redis:7.4
+    container_name: redis_node_5
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6383:6379"
+    volumes:
+      - redis_node_5_data:/data
+    networks:
+      - app_network
+
+  redis-node-6:
+    image: redis:7.4
+    container_name: redis_node_6
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass dragon_knight --masterauth dragon_knight
+    ports:
+      - "6384:6379"
+    volumes:
+      - redis_node_6_data:/data
+    networks:
+      - app_network
+
+  redis-cluster-init:
+    image: redis:7.4
+    container_name: redis_cluster_init
+    command: >
+      sh -c "sleep 5 &&
+      if redis-cli -h redis-node-1 -a dragon_knight --no-auth-warning cluster info 2>/dev/null | grep -q 'cluster_state:ok'; then
+        echo 'Redis cluster already initialized';
+        exit 0;
+      fi;
+      echo 'yes' | redis-cli -a dragon_knight --cluster create
+      redis-node-1:6379
+      redis-node-2:6379
+      redis-node-3:6379
+      redis-node-4:6379
+      redis-node-5:6379
+      redis-node-6:6379
+      --cluster-replicas 1"
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    networks:
+      - app_network
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter
+    container_name: node-exporter
+    pid: "host"
+    networks:
+      - app_network
+    volumes:
+      - "/:/host:ro,rslave"
+    command:
+      - "--path.rootfs=/host"
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: my-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${KAFKA_ADVERTISED_HOST:-kafka}:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_CLUSTER_ID: kraft-cluster-01
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - app_network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: alertmanager
+    volumes:
+      - ../../observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    ports:
+      - "9093:9093"
+    networks:
+      - app_network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../observability/rules:/etc/prometheus/rules
+    networks:
+      - app_network
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ../../observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../../observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - app_network
+    depends_on:
+      - prometheus
+      - jaeger
+      - alertmanager
+      - loki
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ../../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - gateway
+    networks:
+      - app_network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ../../observability/otel-collector.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "13133:13133"
+      - "8889:8889"
+    depends_on:
+      - jaeger
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: jaeger
+    ports:
+      - "16686:16686"
+      - "14250:14250"
+    networks:
+      - app_network
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    container_name: kafka-exporter
+    ports:
+      - "9308:9308"
+    networks:
+      - app_network
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - "--kafka.server=my-kafka:9092"
+      - "--web.listen-address=0.0.0.0:9308"
+      - "--log.level=debug"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --tries=1 --spider http://localhost:9308/metrics || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  loki:
+    container_name: loki
+    image: grafana/loki:3.5.8
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../../observability/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - app_network
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: gateway/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/gateway:latest
+    container_name: gateway
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    ports:
+      - "5000:5000"
+    networks:
+      - app_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis-cluster-init:
+        condition: service_completed_successfully
+      auth:
+        condition: service_started
+      card:
+        condition: service_started
+      merchant:
+        condition: service_started
+      user:
+        condition: service_started
+      role:
+        condition: service_started
+      saldo:
+        condition: service_started
+      topup:
+        condition: service_started
+      transaction:
+        condition: service_started
+      transfer:
+        condition: service_started
+      withdraw:
+        condition: service_started
+      stats-reader:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_GATEWAY}
+      - REDIS_PORT=${REDIS_PORT_GATEWAY}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_GATEWAY}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - HTTP_PORT=5000
+
+  auth:
+    build:
+      context: ../..
+      dockerfile: auth/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/auth:latest
+    container_name: auth
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      user:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_AUTH}
+      - REDIS_PORT=${REDIS_PORT_AUTH}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_AUTH}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - QUARKUS_GRPC_CLIENTS__USER__HOST=${USER_GRPC_HOST}
+      - QUARKUS_GRPC_CLIENTS__USER__PORT=${USER_GRPC_PORT}
+      - QUARKUS_GRPC_CLIENTS__ROLE__HOST=${ROLE_GRPC_HOST}
+      - QUARKUS_GRPC_CLIENTS__ROLE__PORT=${ROLE_GRPC_PORT}
+      - GRPC_PORT=${GRPC_AUTH_PORT}
+
+  merchant:
+    build:
+      context: ../..
+      dockerfile: merchant/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/merchant:latest
+    container_name: merchant
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      user:
+        condition: service_started
+      transaction:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_MERCHANT}
+      - REDIS_PORT=${REDIS_PORT_MERCHANT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_MERCHANT}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_MERCHANT_PORT}
+
+  card:
+    build:
+      context: ../..
+      dockerfile: card/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/card:latest
+    container_name: card
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      user:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_CARD}
+      - REDIS_PORT=${REDIS_PORT_CARD}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_CARD}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_CARD_PORT}
+
+  saldo:
+    build:
+      context: ../..
+      dockerfile: saldo/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/saldo:latest
+    container_name: saldo
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      transaction:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_SALDO}
+      - REDIS_PORT=${REDIS_PORT_SALDO}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_SALDO}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_SALDO_PORT}
+
+  role:
+    build:
+      context: ../..
+      dockerfile: role/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/role:latest
+    container_name: role
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      user:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_ROLE}
+      - REDIS_PORT=${REDIS_PORT_ROLE}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_ROLE}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_ROLE_PORT}
+
+  topup:
+    build:
+      context: ../..
+      dockerfile: topup/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/topup:latest
+    container_name: topup
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      transaction:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_TOPUP}
+      - REDIS_PORT=${REDIS_PORT_TOPUP}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_TOPUP}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_TOPUP_PORT}
+
+  transaction:
+    build:
+      context: ../..
+      dockerfile: transaction/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/transaction:latest
+    container_name: transaction
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+    environment:
+      - REDIS_HOST=${REDIS_HOST_TRANSACTION}
+      - REDIS_PORT=${REDIS_PORT_TRANSACTION}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_TRANSACTION}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_TRANSACTION_PORT}
+
+  transfer:
+    build:
+      context: ../..
+      dockerfile: transfer/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/transfer:latest
+    container_name: transfer
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      transaction:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_TRANSFER}
+      - REDIS_PORT=${REDIS_PORT_TRANSFER}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_TRANSFER}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_TRANSFER_PORT}
+
+  user:
+    build:
+      context: ../..
+      dockerfile: user/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/user:latest
+    container_name: user
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+    environment:
+      - REDIS_HOST=${REDIS_HOST_USER}
+      - REDIS_PORT=${REDIS_PORT_USER}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_USER}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_USER_PORT}
+
+  email-service:
+    build:
+      context: ../..
+      dockerfile: email-service/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/email-service:latest
+    container_name: email-service
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    environment:
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+
+  withdraw:
+    build:
+      context: ../..
+      dockerfile: withdraw/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/withdraw:latest
+    container_name: withdraw
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+      - ../../chaos.yaml:/app/chaos.yaml:ro
+    networks:
+      - app_network
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      redis-cluster-init:
+        condition: service_completed_successfully
+      transaction:
+        condition: service_started
+    environment:
+      - REDIS_HOST=${REDIS_HOST_WITHDRAW}
+      - REDIS_PORT=${REDIS_PORT_WITHDRAW}
+      - REDIS_PASSWORD=${REDIS_PASSWORD_WITHDRAW}
+      - REDIS_CLUSTER_ENABLED=${REDIS_CLUSTER_ENABLED}
+      - REDIS_CLUSTER_ENDPOINTS=${REDIS_CLUSTER_ENDPOINTS}
+      - QUARKUS_REDIS_CLIENT_TYPE=cluster
+      - OTEL_ENDPOINT=otel-collector:4317
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - GRPC_PORT=${GRPC_WITHDRAW_PORT}
+
+  # One-shot seeder job: discovers per-domain seeders (ServiceLoader) and runs
+  # them in order (identity -> merchant/card -> saldo -> finance). Exits after
+  # seeding; run explicitly with: docker compose run --rm seeder
+  seeder:
+    build:
+      context: ../..
+      dockerfile: seeder/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/seeder:latest
+    container_name: seeder
+    env_file: ./docker.env
+    volumes:
+      - ./docker.env:/app/docker.env
+    networks:
+      - app_network
+    restart: "no"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      # Migrations run at app start; seed after the schema owners are up.
+      user:
+        condition: service_started
+      transaction:
+        condition: service_started
+      merchant:
+        condition: service_started
+      card:
+        condition: service_started
+    environment:
+      - DB_HOST=pgbouncer
+      - DB_PORT=5432
+      - SEED_DOMAINS=${SEED_DOMAINS:-identity,merchant,card,saldo,topup,transaction,transfer,withdraw}
+
+  # Stats pipeline: domain services -> outbox -> Kafka stats.payment.* ->
+  # stats-writer (consume -> ClickHouse) -> stats-reader (gRPC stats API)
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  stats-writer:
+    build:
+      context: ../..
+      dockerfile: stats-writer/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/stats-writer:latest
+    container_name: stats-writer
+    env_file: ./docker.env
+    networks:
+      - app_network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      - APP_ENV=docker
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_HTTP_PORT=8123
+      - CLICKHOUSE_DATABASE=payment_stats
+      - QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - QUARKUS_OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf
+      - QUARKUS_OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/protobuf
+
+  stats-reader:
+    build:
+      context: ../..
+      dockerfile: stats-reader/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/stats-reader:latest
+    container_name: stats-reader
+    env_file: ./docker.env
+    networks:
+      - app_network
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      - APP_ENV=docker
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_HTTP_PORT=8123
+      - CLICKHOUSE_DATABASE=payment_stats
+      - REDIS_HOSTS=${REDIS_HOSTS}
+      - REDIS_CLIENT_TYPE=cluster
+      - GRPC_PORT=${GRPC_STATS_READER_PORT:-9015}
+      - QUARKUS_GRPC_SERVER_PORT=${GRPC_STATS_READER_PORT:-9015}
+
+  stats-backfill:
+    build:
+      context: ../..
+      dockerfile: stats-backfill/Dockerfile
+    image: monolith-payment-gateway-grpc-quarkus/stats-backfill:latest
+    container_name: stats-backfill
+    env_file: ./docker.env
+    networks:
+      - app_network
+    restart: "no"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    environment:
+      - APP_ENV=docker
+      - BACKFILL_DOMAINS=${BACKFILL_DOMAINS:-transaction,topup,transfer,withdraw,saldo,merchant,card}
+      - BACKFILL_FROM=${BACKFILL_FROM:-}
+
+volumes:
+  clickhouse_data:
+  loki-data:
+  grafana-storage:
+  postgres_data:
+  kafka_data:
+  redis_node_1_data:
+  redis_node_2_data:
+  redis_node_3_data:
+  redis_node_4_data:
+  redis_node_5_data:
+  redis_node_6_data:
+
+networks:
+  app_network:
+    driver: bridge

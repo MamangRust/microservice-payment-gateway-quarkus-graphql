@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package pb.card;
+
+import "card/card.proto";
+import "google/protobuf/timestamp.proto";
+
+message AuthorizeCardRequest {
+  string card_number = 1;
+  int32 merchant_id = 2;
+  double amount = 3;
+  string currency = 4;
+  string pos_entry_mode = 5;
+  string mcc = 6;
+  string idempotency_key = 7;
+}
+
+message ReverseTransactionRequest {
+  int64 auth_txn_id = 1;
+  string card_number = 2;
+  double amount = 3;
+  string idempotency_key = 4;
+}
+
+message CardAuthTransactionResponse {
+  int64 auth_txn_id = 1;
+  string card_number = 2;
+  int32 merchant_id = 3;
+  double amount = 4;
+  string currency = 5;
+  string pos_entry_mode = 6;
+  string mcc = 7;
+  string idempotency_key = 8;
+  int32 risk_score = 9;
+  string status = 10;
+  string authorized_at = 11;
+  string reversed_at = 12;
+  string created_at = 13;
+  string updated_at = 14;
+}
+
+message ApiResponseCardAuthTransaction {
+  string status = 1;
+  string message = 2;
+  CardAuthTransactionResponse data = 3;
+}
+
+service CardAuthorizationService {
+  rpc Authorize(AuthorizeCardRequest) returns (ApiResponseCardAuthTransaction) {}
+  rpc Reverse(ReverseTransactionRequest) returns (ApiResponseCardAuthTransaction) {}
+}

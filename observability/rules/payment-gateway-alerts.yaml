@@ -1,0 +1,97 @@
+groups:
+  - name: payment-gateway-alerts
+    rules:
+      # ── Per-service request error rate (status label is SUCCESS/ERROR) ──────
+      - alert: HighErrorRate
+        expr: |
+          sum by (service_name) (
+            rate(java_app_requests_total{status="ERROR"}[5m])
+          )
+          /
+          sum by (service_name) (
+            rate(java_app_requests_total[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.service_name }} ({{ $value | humanizePercentage }})"
+          description: "More than 5% of requests to {{ $labels.service_name }} are failing in the last 5 minutes."
+          runbook: "Check service logs and traces (Jaeger) for {{ $labels.service_name }}; look for gRPC status mapping or dependency failures."
+
+      # ── Per-service p95 latency (histogram from OTel) ───────────────────────
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service_name) (
+              rate(java_app_request_duration_seconds_bucket[5m])
+            )
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on {{ $labels.service_name }} (p95 = {{ $value }}s)"
+          description: "95th percentile latency for {{ $labels.service_name }} exceeded 1s for 5 minutes."
+          runbook: "Inspect traces for slow downstream gRPC calls (card/saldo/user) or database queries via PgBouncer."
+
+      # ── No-traffic watchdog (flapping / stuck deployment) ───────────────────
+      - alert: NoTraffic
+        expr: |
+          sum by (service_name) (
+            rate(java_app_requests_total[10m])
+          ) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No traffic on {{ $labels.service_name }}"
+          description: "{{ $labels.service_name }} received no requests for 10 minutes. Verify the deployment is not stuck or scaled to zero."
+
+      # ── Gateway availability (api-gateway exports JVM but not request counters) ──
+      - alert: ApiGatewayJvmDown
+        expr: |
+          absent(java_app_jvm_memory_used_bytes{service_name="api-gateway"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API Gateway is not reporting metrics"
+          description: "No JVM metrics from api-gateway for 2 minutes — the gateway is down or not exporting OTLP."
+
+      # ── Outbox→ClickHouse pipeline lag (stats-writer) ──────────────────────
+      # stats_writer_kafka_lag = sum of (end offset - position) over assigned
+      # partitions — events published by the outbox relay still waiting in
+      # Kafka to be consumed/written to ClickHouse (F6).
+      - alert: OutboxLagGrowing
+        expr: |
+          sum(stats_writer_kafka_lag) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox→ClickHouse lag growing ({{ $value }} events behind)"
+          description: "stats-writer consumer is more than 5000 records behind the end of the stats topics for 5 minutes."
+          runbook: "Check stats-writer consumer health, Kafka cluster, and ClickHouse write throughput."
+
+      - alert: OutboxLagCritical
+        expr: |
+          sum(stats_writer_kafka_lag) > 50000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox→ClickHouse lag critical ({{ $value }} events behind)"
+          description: "stats-writer consumer is more than 50000 records behind — stats dashboards are stale."
+          runbook: "Verify stats-writer is running, ClickHouse is up, and Kafka retention is not truncating the stats topics."
+
+      - alert: StatsWriterFlushErrors
+        expr: |
+          increase(stats_writer_flush_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "stats-writer ClickHouse flush errors ({{ $value }} in 5m)"
+          description: "More than 10 ClickHouse flush failures in 5 minutes — rows are being re-buffered and retried."
+          runbook: "Check ClickHouse availability and the stats_writer_flush_errors_total metric for the error pattern."

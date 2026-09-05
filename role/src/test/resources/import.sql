@@ -1,0 +1,2 @@
+-- Role module test data
+-- Entity tables are auto-created by Hibernate (roles, role_permissions)

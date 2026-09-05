@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: payment-gateway
+data:
+  APP_ENV: "kubernetes"
+  APP_LOGGER: "production"
+  DB_SEEDER: "true"
+  # GHCR image owner — must match github.repository_owner (lowercase) of the
+  # repository whose CI pushes images to ghcr.io/<owner>/monolith-payment-gateway-grpc-quarkus/...
+  GHCR_OWNER: "mamangrust"
+
+  # ---- Database (all services read DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME) ----
+  # Direct to postgres (F1: each service runs its own Flyway migrations at
+  # startup; pgbouncer is still deployed for manual pooler use).
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_NAME: "PAYMENT_GATEWAY"
+  POSTGRES_DB: "PAYMENT_GATEWAY"
+  DB_MAX_OPEN_CONNS: "50"
+  DB_MAX_IDLE_CONNS: "10"
+  DB_CONN_MAX_LIFETIME: "30m"
+
+  # ---- Kafka (card KafkaService/FraudScoringConsumer/CardEventLogConsumer + email-service) ----
+  KAFKA_BROKERS: "kafka.payment-gateway.svc.cluster.local:9092"
+
+  # ---- Redis (auth hardcodes redis://:dragon_knight@redis:6379 in application.properties) ----
+  REDIS_HOST: "redis.payment-gateway.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_CLUSTER_ENABLED: "true"
+  REDIS_CLUSTER_ENDPOINTS: "redis-cluster-0.redis-cluster-headless.payment-gateway.svc.cluster.local:6379,redis-cluster-1.redis-cluster-headless.payment-gateway.svc.cluster.local:6379,redis-cluster-2.redis-cluster-headless.payment-gateway.svc.cluster.local:6379,redis-cluster-3.redis-cluster-headless.payment-gateway.svc.cluster.local:6379,redis-cluster-4.redis-cluster-headless.payment-gateway.svc.cluster.local:6379,redis-cluster-5.redis-cluster-headless.payment-gateway.svc.cluster.local:6379"
+
+  # ---- gRPC client hosts (gateway + service-to-service) ----
+  AUTH_HOST: "auth.payment-gateway.svc.cluster.local"
+  USER_HOST: "user.payment-gateway.svc.cluster.local"
+  CARD_HOST: "card.payment-gateway.svc.cluster.local"
+  MERCHANT_HOST: "merchant.payment-gateway.svc.cluster.local"
+  ROLE_HOST: "role.payment-gateway.svc.cluster.local"
+  SALDO_HOST: "saldo.payment-gateway.svc.cluster.local"
+  TOPUP_HOST: "topup.payment-gateway.svc.cluster.local"
+  TRANSACTION_HOST: "transaction.payment-gateway.svc.cluster.local"
+  TRANSFER_HOST: "transfer.payment-gateway.svc.cluster.local"
+  WITHDRAW_HOST: "withdraw.payment-gateway.svc.cluster.local"
+
+  USER_GRPC_HOST: "user.payment-gateway.svc.cluster.local"
+  ROLE_GRPC_HOST: "role.payment-gateway.svc.cluster.local"
+  USER_SERVICE_HOST: "user.payment-gateway.svc.cluster.local"
+  CARD_SERVICE_HOST: "card.payment-gateway.svc.cluster.local"
+  SALDO_SERVICE_HOST: "saldo.payment-gateway.svc.cluster.local"
+  MERCHANT_SERVICE_HOST: "merchant.payment-gateway.svc.cluster.local"
+
+  # ---- gRPC ports (matching Quarkus application.properties) ----
+  GRPC_AUTH_PORT: "9012"
+  GRPC_ROLE_PORT: "9006"
+  GRPC_CARD_PORT: "9004"
+  GRPC_MERCHANT_PORT: "9005"
+  GRPC_USER_PORT: "9011"
+  GRPC_SALDO_PORT: "9007"
+  GRPC_TOPUP_PORT: "9008"
+  GRPC_TRANSACTION_PORT: "9009"
+  GRPC_TRANSFER_PORT: "9010"
+  GRPC_WITHDRAW_PORT: "9013"
+
+  AUTH_GRPC_PORT: "9012"
+  USER_GRPC_PORT: "9011"
+  CARD_GRPC_PORT: "9004"
+  MERCHANT_GRPC_PORT: "9005"
+  ROLE_GRPC_PORT: "9006"
+  SALDO_GRPC_PORT: "9007"
+  TOPUP_GRPC_PORT: "9008"
+  TRANSACTION_GRPC_PORT: "9009"
+  TRANSFER_GRPC_PORT: "9010"
+  WITHDRAW_GRPC_PORT: "9013"
+
+  USER_SERVICE_GRPC_PORT: "9011"
+  CARD_SERVICE_GRPC_PORT: "9004"
+  SALDO_SERVICE_GRPC_PORT: "9007"
+  MERCHANT_SERVICE_GRPC_PORT: "9005"
+
+  # ---- Reconciliation (topup/transaction/transfer/withdraw) ----
+  RECONCILIATION_ENABLED: "true"
+  RECONCILIATION_INTERVAL_MS: "30000"
+  RECONCILIATION_MAX_ATTEMPTS: "5"
+  RECONCILIATION_LEASE_MINUTES: "2"
+
+  # ---- Email service ----
+  SMTP_SERVER: "smtp.ethereal.email"
+  SMTP_PORT: "587"
+  KAFKA_EMAIL_MAX_RETRIES: "3"
+  KAFKA_EMAIL_RETRY_BACKOFF_MS: "250"
+
+  # ---- Observability ----
+  OTEL_ENDPOINT: "otel-collector.payment-gateway.svc.cluster.local:4317"

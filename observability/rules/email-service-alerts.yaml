@@ -1,0 +1,47 @@
+# Email service reliability alerts (Phase 6 — applied from the Phase 5 template).
+# Loaded by prometheus.yml via rule_files: /etc/prometheus/rules/*.yaml
+groups:
+  - name: email-service-alerts
+    rules:
+      - alert: EmailConsumerLagHigh
+        expr: max by (partition) (kafka_consumer_lag{group="email-service-group"}) > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Email consumer lag is high"
+          description: "Email consumer group is more than 1000 messages behind (partition {{ $labels.partition }})."
+      - alert: EmailDlqGrowing
+        expr: increase(email_dlq_total[15m]) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Emails are being dead-lettered"
+          description: "The email DLQ grew in the last 15 minutes — check SMTP and retry health."
+      - alert: EmailRetryRateHigh
+        expr: rate(email_retried_total[5m]) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "High email retry rate"
+          description: "More than 0.5 emails/s are being routed to the retry topic."
+      - alert: EmailSmtpFailureHigh
+        expr: rate(email_failed_total[5m]) > 0.2
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "High SMTP failure rate"
+          description: "More than 0.2 email sends/s are failing."
+      - alert: EmailRedisUnavailable
+        expr: increase(email_idempotency_claim_failed_total[5m]) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis unavailable for email idempotency"
+          description: "Idempotency claims are failing — fail-open is active and the duplicate window is unbounded."
+      - alert: EmailConsumerLagMissing
+        expr: absent(kafka_consumer_lag{group="email-service-group"})
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Email consumer lag metric missing"
+          description: "No kafka_consumer_lag series for the email consumer — the consumer may be down or have no partition assignment."

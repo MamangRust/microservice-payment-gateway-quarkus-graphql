@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-config
+  namespace: payment-gateway
+data:
+  otel-collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "kafka-exporter"
+              scrape_interval: 5s
+              static_configs:
+                - targets: ["kafka-exporter.payment-gateway.svc.cluster.local:9308"]
+            - job_name: "gateway-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["gateway.payment-gateway.svc.cluster.local:8080"]
+            - job_name: "auth-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["auth.payment-gateway.svc.cluster.local:8092"]
+            - job_name: "user-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["user.payment-gateway.svc.cluster.local:8091"]
+            - job_name: "role-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["role.payment-gateway.svc.cluster.local:8086"]
+            - job_name: "card-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["card.payment-gateway.svc.cluster.local:8084"]
+            - job_name: "merchant-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["merchant.payment-gateway.svc.cluster.local:8085"]
+            - job_name: "saldo-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["saldo.payment-gateway.svc.cluster.local:8087"]
+            - job_name: "topup-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["topup.payment-gateway.svc.cluster.local:8088"]
+            - job_name: "transaction-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["transaction.payment-gateway.svc.cluster.local:8089"]
+            - job_name: "transfer-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["transfer.payment-gateway.svc.cluster.local:8090"]
+            - job_name: "withdraw-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["withdraw.payment-gateway.svc.cluster.local:8093"]
+            - job_name: "email-service"
+              metrics_path: "/q/metrics"
+              static_configs:
+                - targets: ["email-service.payment-gateway.svc.cluster.local:8094"]
+
+    processors:
+      batch:
+
+    exporters:
+      otlp:
+        endpoint: "jaeger.payment-gateway.svc.cluster.local:4317"
+        tls:
+          insecure: true
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        namespace: "java_app"
+        resource_to_telemetry_conversion:
+          enabled: true
+      otlphttp/loki:
+        endpoint: "http://loki.payment-gateway.svc.cluster.local:3100/otlp"
+        tls:
+          insecure: true
+        timeout: 10s
+
+    extensions:
+      health_check:
+      pprof:
+      zpages:
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp]
+
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [batch]
+          exporters: [prometheus]
+
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlphttp/loki]

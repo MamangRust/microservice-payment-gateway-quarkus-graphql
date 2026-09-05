@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package pb.card;
+
+import "google/protobuf/timestamp.proto";
+import "common/api.proto";
+
+message PostPaymentRequest {
+  string card_number = 1;
+  double amount = 2;
+  string payment_channel = 3;
+  string reference_id = 4;
+}
+
+message GetPaymentHistoryRequest {
+  string card_number = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message CardPaymentResponse {
+  int32 id = 1;
+  string card_number = 2;
+  double amount = 3;
+  string payment_channel = 4;
+  string reference_id = 5;
+  string status = 6;
+  string paid_at = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message ApiResponseCardPayment {
+  string status = 1;
+  string message = 2;
+  CardPaymentResponse data = 3;
+}
+
+message ApiResponsePaginationCardPayment {
+  string status = 1;
+  string message = 2;
+  repeated CardPaymentResponse data = 3;
+  pb.common.PaginationMeta pagination_meta = 4;
+}
+
+message ApiResponseCountPayment {
+  string status = 1;
+  string message = 2;
+  int64 data = 3;
+}
+
+service CardPaymentService {
+  rpc PostPayment(PostPaymentRequest) returns (ApiResponseCardPayment) {}
+  rpc GetPaymentHistory(GetPaymentHistoryRequest) returns (ApiResponsePaginationCardPayment) {}
+  rpc CountPayments(GetPaymentHistoryRequest) returns (ApiResponseCountPayment) {}
+}

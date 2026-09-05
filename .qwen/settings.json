@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Agent(Explore)",
+      "Bash(wc *)",
+      "Bash(./mvnw *)",
+      "Bash(which *)",
+      "Bash(ls *)",
+      "Bash(java *)",
+      "Bash(mvn *)",
+      "Bash(git stash)",
+      "Bash(find *)",
+      "Bash(do *)",
+      "Bash(python3 *)",
+      "Bash(done)",
+      "Bash(tail *)",
+      "Bash(sed *)",
+      "Bash(timeout *)"
+    ]
+  },
+  "$version": 4
+}

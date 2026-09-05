@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: email-smtp-egress
+  namespace: payment-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: email-service
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 587

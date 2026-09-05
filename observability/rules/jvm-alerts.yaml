@@ -1,0 +1,51 @@
+groups:
+  - name: jvm-alerts
+    rules:
+      - alert: HighHeapUsage
+        expr: |
+          sum by (service_name) (
+            java_app_jvm_memory_used_bytes{jvm_memory_type="heap"}
+          ) > 1024 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High heap usage on {{ $labels.service_name }} ({{ $value | humanize1024 }}B)"
+          description: "Heap usage of {{ $labels.service_name }} exceeded 1 GiB for 5 minutes."
+          runbook: "Check G1 heap trend in Grafana JVM panel; consider raising -Xmx or investigating a leak."
+
+      - alert: CriticalHeapUsage
+        expr: |
+          sum by (service_name) (
+            java_app_jvm_memory_used_bytes{jvm_memory_type="heap"}
+          ) > 2048 * 1024 * 1024
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical heap usage on {{ $labels.service_name }} ({{ $value | humanize1024 }}B)"
+          description: "Heap usage of {{ $labels.service_name }} exceeded 2 GiB — OOM risk."
+
+      - alert: HighGCPause
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, service_name) (
+              rate(java_app_jvm_gc_duration_seconds_bucket[5m])
+            )
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GC pause above 1s on {{ $labels.service_name }}"
+          description: "P99 GC pause time exceeded 1 second for 5 minutes."
+
+      - alert: HighThreadCount
+        expr: |
+          java_app_jvm_thread_count > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High thread count on {{ $labels.service_name }} ({{ $value }})"
+          description: "{{ $labels.service_name }} is running more than 500 threads — possible thread leak or event-loop blockage."

@@ -1,0 +1,2 @@
+-- Auth module test data
+-- Entity tables are auto-created by Hibernate (refresh_tokens, reset_tokens)

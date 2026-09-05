@@ -1,0 +1,2 @@
+com.sanedge.gateway.exception.GraphQLErrorExtensionProvider
+com.sanedge.gateway.exception.ValidationErrorExtensionProvider

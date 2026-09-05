@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../../base/auth
+
+# GHCR image owner templating (mirrors the aggregate production overlay):
+# the base manifests reference ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/auth,
+# and this overlay pins the tag + substitutes the real owner for this module.
+# On a fork, change the owner segment below to your GHCR owner.
+images:
+- name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/auth
+  newName: ghcr.io/mamangrust/monolith-payment-gateway-grpc-quarkus/auth
+  newTag: latest
+
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: auth
+    spec:
+      template:
+        spec:
+          imagePullSecrets:
+          - name: ghcr-pull-secret
+  target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: auth

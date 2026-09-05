@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.sanedge.common.proto";
+option java_outer_classname = "ProductProto";
+
+package product;
+
+service ProductService {
+  rpc GetProduct (GetProductRequest) returns (ProductReply);
+  rpc ListProducts (ListProductsRequest) returns (ListProductsReply);
+  rpc CreateProduct (CreateProductRequest) returns (ProductReply);
+  rpc UpdateProduct (UpdateProductRequest) returns (ProductReply);
+  rpc DeleteProduct (DeleteProductRequest) returns (DeleteProductReply);
+}
+
+message GetProductRequest {
+  string id = 1;
+}
+
+message ListProductsRequest {
+  int32 page = 1;
+  int32 size = 2;
+}
+
+message CreateProductRequest {
+  string name = 1;
+  string description = 2;
+  double price = 3;
+  int32 stock = 4;
+}
+
+message UpdateProductRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  int32 stock = 5;
+}
+
+message DeleteProductRequest {
+  string id = 1;
+}
+
+message ProductReply {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  int32 stock = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message ListProductsReply {
+  repeated ProductReply products = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message DeleteProductReply {
+  bool success = 1;
+  string message = 2;
+}

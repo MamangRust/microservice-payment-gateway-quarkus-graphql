@@ -1,0 +1,315 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Financial Pipeline — SLO, Outbox Lag & Cache",
+    "uid": "financial-pipeline",
+    "schemaVersion": 40,
+    "tags": ["financial", "slo", "outbox", "stats", "cache"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "time": {
+      "from": "now-3h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Outbox→ClickHouse Pipeline Lag (records behind)",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(stats_writer_kafka_lag)",
+            "refId": "A",
+            "legendFormat": "lag"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 1000},
+                {"color": "orange", "value": 5000},
+                {"color": "red", "value": 50000}
+              ]
+            }
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Batch Pending (rows awaiting flush)",
+        "type": "stat",
+        "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "stats_writer_batch_pending",
+            "refId": "A",
+            "legendFormat": "pending"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 500},
+                {"color": "red", "value": 1000}
+              ]
+            }
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 3,
+        "title": "Flush Errors (rate/5m)",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "sum(increase(stats_writer_flush_errors_total[5m]))",
+            "refId": "A",
+            "legendFormat": "errors/5m"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 5},
+                {"color": "red", "value": 20}
+              ]
+            }
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 4,
+        "title": "Overall Success Rate (stats pipeline)",
+        "type": "gauge",
+        "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+        "targets": [
+          {
+            "expr": "1 - (sum(rate(java_app_requests_total{status=\"ERROR\"}[5m])) / sum(rate(java_app_requests_total[5m])))",
+            "refId": "A",
+            "legendFormat": "success rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 0.95},
+                {"color": "green", "value": 0.99}
+              ]
+            }
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 5,
+        "title": "Outbox Lag Over Time",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(stats_writer_kafka_lag)",
+            "refId": "A",
+            "legendFormat": "kafka lag (records behind)"
+          },
+          {
+            "expr": "stats_writer_batch_pending",
+            "refId": "B",
+            "legendFormat": "batch pending"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Events Consumed vs Flush Errors (rate)",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 4, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(stats_writer_events_consumed_total[1m]))",
+            "refId": "A",
+            "legendFormat": "events consumed/s"
+          },
+          {
+            "expr": "sum(rate(stats_writer_flush_errors_total[1m]))",
+            "refId": "B",
+            "legendFormat": "flush errors/s"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Per-Domain Request Rate (RPS)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum by (service_name) (rate(java_app_requests_total[1m]))",
+            "refId": "A",
+            "legendFormat": "{{service_name}}"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Per-Domain Error Rate",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 10, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum by (service_name) (rate(java_app_requests_total{status=\"ERROR\"}[1m])) / sum by (service_name) (rate(java_app_requests_total[1m]))",
+            "refId": "A",
+            "legendFormat": "{{service_name}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 9,
+        "title": "Financial Command Latency P95 (seconds)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate(java_app_request_duration_seconds_bucket{service_name=~\".*\"}[5m])))",
+            "refId": "A",
+            "legendFormat": "p95 {{service_name}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 10,
+        "title": "Financial Command Latency P99 (seconds)",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, sum by (le, service_name) (rate(java_app_request_duration_seconds_bucket{service_name=~\".*\"}[5m])))",
+            "refId": "A",
+            "legendFormat": "p99 {{service_name}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 11,
+        "title": "Cache Hits vs Misses (stats-reader apigw:stats)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(java_app_cache_hits_total{service_name=\"stats-reader\"}[1m]))",
+            "refId": "A",
+            "legendFormat": "cache hits/s"
+          },
+          {
+            "expr": "sum(rate(java_app_cache_misses_total{service_name=\"stats-reader\"}[1m]))",
+            "refId": "B",
+            "legendFormat": "cache misses/s"
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Saldo Mutation Latency P99 (Debit/Credit)",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, sum by (le) (rate(java_app_request_duration_seconds_bucket{service_name=\"saldo-service\", method=~\"DebitSaldo|CreditSaldo|ApplySaldo\"}[5m])))",
+            "refId": "A",
+            "legendFormat": "p99 saldo"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          },
+          "overrides": []
+        }
+      },
+      {
+        "id": 13,
+        "title": "Outbox Published vs Failed (rate)",
+        "type": "timeseries",
+        "gridPos": {"x": 0, "y": 28, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(outbox_events_published_total[1m]))",
+            "refId": "A",
+            "legendFormat": "published/s"
+          },
+          {
+            "expr": "sum(rate(outbox_events_failed_total[1m]))",
+            "refId": "B",
+            "legendFormat": "failed/s"
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Top Endpoints by Request Rate",
+        "type": "timeseries",
+        "gridPos": {"x": 12, "y": 28, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "topk(5, sum by (method) (rate(java_app_requests_total[5m])))",
+            "refId": "A",
+            "legendFormat": "{{method}}"
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "service_name",
+          "type": "query",
+          "query": "label_values(java_app_requests_total, service_name)",
+          "refresh": 2,
+          "multi": true,
+          "includeAll": true,
+          "allValue": ".*"
+        }
+      ]
+    }
+  },
+  "folder": null,
+  "overwrite": true
+}

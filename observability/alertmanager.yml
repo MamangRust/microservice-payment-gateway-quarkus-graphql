@@ -1,0 +1,15 @@
+global:
+  smtp_smarthost: 'smtp.ethereal.email:587'
+  smtp_from: 'no-reply@payment-gateway.com'
+  smtp_auth_username: 'julius.davis@ethereal.email'
+  smtp_auth_password: '4vWXpZfTMPAazhVZFU'
+
+route:
+  receiver: 'default'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: 'default'

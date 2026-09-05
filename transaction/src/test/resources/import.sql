@@ -1,0 +1,2 @@
+-- Transaction module test data
+-- Entity tables are auto-created by Hibernate (transactions)
