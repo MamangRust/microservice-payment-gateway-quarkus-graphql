@@ -21,10 +21,8 @@ import com.sanedge.common.enums.Status;
 import com.sanedge.common.exception.InvalidRequestException;
 import com.sanedge.common.exception.ResourceAlreadyExistsException;
 import com.sanedge.common.exception.ResourceNotFoundException;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoQueryService;
-import pb.saldo.SaldoCommandService;
-import io.quarkus.grpc.GrpcClient;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.topup.service.KafkaService;
 import io.vertx.core.json.JsonObject;
 
@@ -44,9 +42,8 @@ import jakarta.validation.Validator;
 public class TopupCommandServiceImpl implements TopupCommandService {
     private static final Logger logger = LoggerFactory.getLogger(TopupCommandServiceImpl.class);
 
-    private final CardQueryService cardQueryService;
-    private final SaldoQueryService saldoQueryService;
-    private final SaldoCommandService saldoCommandService;
+    private final CardPort cardPort;
+    private final SaldoPort saldoPort;
     private final TopupQueryRepository topupQueryRepository;
     private final TopupCommandRepository topupCommandRepository;
     private final Validator validator;
@@ -56,9 +53,8 @@ public class TopupCommandServiceImpl implements TopupCommandService {
     private final OutboxRepository outboxRepository;
 
     @Inject
-    public TopupCommandServiceImpl(@GrpcClient("card") CardQueryService cardQueryService,
-            @GrpcClient("saldo") SaldoQueryService saldoQueryService,
-            @GrpcClient("saldo") SaldoCommandService saldoCommandService,
+    public TopupCommandServiceImpl(CardPort cardPort,
+            SaldoPort saldoPort,
             TopupQueryRepository topupQueryRepository,
             TopupCommandRepository topupCommandRepository,
             Validator validator,
@@ -66,9 +62,8 @@ public class TopupCommandServiceImpl implements TopupCommandService {
             KafkaService kafkaService,
             TracingMetrics tracingMetrics,
             OutboxRepository outboxRepository) {
-        this.cardQueryService = cardQueryService;
-        this.saldoQueryService = saldoQueryService;
-        this.saldoCommandService = saldoCommandService;
+        this.cardPort = cardPort;
+        this.saldoPort = saldoPort;
         this.topupQueryRepository = topupQueryRepository;
         this.topupCommandRepository = topupCommandRepository;
         this.validator = validator;
@@ -157,16 +152,9 @@ public class TopupCommandServiceImpl implements TopupCommandService {
         final Topup[] ledgerRef = new Topup[1];
 
         return tracingMetrics.traceAndMeasure("createTopup", "create_topup", attrs, () -> {
-            return cardQueryService
-                    .findUserCardByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                            .setCardNumber(req.getCardNumber()).build())
+            return cardPort
+                    .findUserCardByCardNumber(req.getCardNumber())
                     .chain(cardWithEmail -> {
-                        if (cardWithEmail == null || cardWithEmail.getCardNumber() == null
-                                || cardWithEmail.getCardNumber().isEmpty()) {
-                            logger.error("Card not found: {}", req.getCardNumber());
-                            throw new ResourceNotFoundException("Card not found");
-                        }
-
                         Topup topup = new Topup();
                         topup.setTopupNo(UUID.randomUUID());
                         topup.setCardNumber(req.getCardNumber());
@@ -186,32 +174,25 @@ public class TopupCommandServiceImpl implements TopupCommandService {
 
                         return topupCommandRepository.persist(topup)
                                 .chain(savedTopup -> {
-                                    return saldoQueryService
-                                            .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                                    .setCardNumber(req.getCardNumber()).build())
-                                            .chain(saldoResponse -> {
-                                                if (saldoResponse == null || !saldoResponse.hasData()) {
-                                                    logger.error("Saldo not found for card: {}", req.getCardNumber());
-                                                    return topupCommandRepository
-                                                            .updateTopupStatus(savedTopup.getTopupId(), "FAILED")
-                                                            .chain(v -> {
-                                                                throw new ResourceNotFoundException("Saldo not found");
-                                                            });
-                                                }
-
-                                                int newBalance = saldoResponse.getData().getTotalBalance()
+                                    return saldoPort
+                                            .findByCardNumber(req.getCardNumber())
+                                            .onFailure(ResourceNotFoundException.class)
+                                            .recoverWithUni(e -> topupCommandRepository
+                                                    .updateTopupStatus(savedTopup.getTopupId(), "FAILED")
+                                                    .chain(v -> Uni.createFrom().failure(
+                                                            new ResourceNotFoundException("Saldo not found"))))
+                                            .chain(saldo -> {
+                                                int newBalance = saldo.totalBalance()
                                                         + req.getTopupAmount().intValue();
-                                                return saldoCommandService
-                                                        .updateSaldoBalance(
-                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                        .newBuilder()
-                                                                        .setCardNumber(
-                                                                                saldoResponse.getData().getCardNumber())
-                                                                        .setTotalBalance(newBalance)
-                                                                        .setDeltaBalance(req.getTopupAmount().intValue())
-                                                                        .setMinimumBalance(0)
-                                                                        .setOperationKey("topup:" + savedTopup.getTopupId())
-                                                                        .build())
+                                                return saldoPort
+                                                        .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                saldo.cardNumber(),
+                                                                newBalance,
+                                                                req.getTopupAmount().intValue(),
+                                                                0,
+                                                                null,
+                                                                null,
+                                                                "topup:" + savedTopup.getTopupId()))
                                                         .chain(v -> {
                                                             savedTopup.setCompensationLegAApplied(true);
                                                             savedTopup.setStatus(Status.SUCCESS);
@@ -233,7 +214,7 @@ public class TopupCommandServiceImpl implements TopupCommandService {
                                                                     + updatedTopup.getTopupId();
                                                             String saldoCardCache = "saldo:card:" + req.getCardNumber();
                                                             String saldoIdCache = "saldo:id:"
-                                                                    + saldoResponse.getData().getSaldoId();
+                                                                    + saldo.saldoId();
 
                                                             return Uni.combine().all().unis(
                                                                     redisService.deleteReactive(topupCardCache),
@@ -241,8 +222,8 @@ public class TopupCommandServiceImpl implements TopupCommandService {
                                                                     redisService.deleteReactive(saldoCardCache),
                                                                     redisService.deleteReactive(saldoIdCache)).asTuple()
                                                                     .chain(t -> {
-                                                                        if (cardWithEmail.getEmail() != null
-                                                                                && !cardWithEmail.getEmail()
+                                                                        if (cardWithEmail.email() != null
+                                                                                && !cardWithEmail.email()
                                                                                         .isEmpty()) {
                                                                             String emailSubject = "Topup Successful - SanEdge";
                                                                             String emailBody = String.format(
@@ -251,7 +232,7 @@ public class TopupCommandServiceImpl implements TopupCommandService {
 
                                                                             JsonObject emailPayload = new JsonObject()
                                                                                     .put("email",
-                                                                                            cardWithEmail.getEmail())
+                                                                                            cardWithEmail.email())
                                                                                     .put("subject", emailSubject)
                                                                                     .put("body", emailBody);
 
@@ -303,19 +284,13 @@ public class TopupCommandServiceImpl implements TopupCommandService {
         logger.info("Starting UpdateTopup: {}", req);
 
         return tracingMetrics.traceAndMeasure("updateTopup", "update_topup", attrs, () -> {
-            return cardQueryService
-                    .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                            .setCardNumber(req.getCardNumber()).build())
-                    .chain(cardResponse -> {
-                        if (cardResponse == null || !cardResponse.hasData()) {
-                            logger.error("Card not found: {}", req.getCardNumber());
-                            return topupCommandRepository.updateTopupStatus(topupId, "FAILED")
-                                    .chain(v -> {
-                                        throw new ResourceNotFoundException("Card not found");
-                                    });
-                        }
-                        return topupQueryRepository.findTopupById(topupId);
-                    })
+            return cardPort
+                    .findCardByCardNumber(req.getCardNumber())
+                    .onFailure(ResourceNotFoundException.class)
+                    .recoverWithUni(e -> topupCommandRepository.updateTopupStatus(topupId, "FAILED")
+                            .chain(v -> Uni.createFrom()
+                                    .failure(new ResourceNotFoundException("Card not found"))))
+                    .chain(card -> topupQueryRepository.findTopupById(topupId))
                     .chain(existingTopup -> {
                         if (existingTopup == null) {
                             logger.error("Topup {} not found", topupId);
@@ -327,27 +302,24 @@ public class TopupCommandServiceImpl implements TopupCommandService {
 
                         int difference = req.getTopupAmount().intValue() - existingTopup.getTopupAmount();
 
-                        return saldoQueryService
-                                .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                        .setCardNumber(req.getCardNumber()).build())
-                                .chain(saldoResponse -> {
-                                    if (saldoResponse == null || !saldoResponse.hasData()) {
-                                        logger.error("Saldo not found for card: {}", req.getCardNumber());
-                                        return topupCommandRepository.updateTopupStatus(topupId, "FAILED")
-                                                .chain(v -> {
-                                                    throw new ResourceNotFoundException("Saldo not found");
-                                                });
-                                    }
-
-                                    int newBalance = saldoResponse.getData().getTotalBalance() + difference;
-                                    return saldoCommandService
-                                            .updateSaldoBalance(
-                                                    pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest.newBuilder()
-                                                            .setCardNumber(saldoResponse.getData().getCardNumber())
-                                                            .setTotalBalance(newBalance)
-                                                            .setDeltaBalance(difference)
-                                                            .setMinimumBalance(0)
-                                                            .build())
+                        return saldoPort
+                                .findByCardNumber(req.getCardNumber())
+                                .onFailure(ResourceNotFoundException.class)
+                                .recoverWithUni(e -> topupCommandRepository
+                                        .updateTopupStatus(topupId, "FAILED")
+                                        .chain(v -> Uni.createFrom()
+                                                .failure(new ResourceNotFoundException("Saldo not found"))))
+                                .chain(saldo -> {
+                                    int newBalance = saldo.totalBalance() + difference;
+                                    return saldoPort
+                                            .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                    saldo.cardNumber(),
+                                                    newBalance,
+                                                    difference,
+                                                    0,
+                                                    null,
+                                                    null,
+                                                    null))
                                             .chain(v -> {
                                                 existingTopup.setTopupAmount(req.getTopupAmount().intValue());
                                                 existingTopup.setStatus(Status.SUCCESS);
@@ -365,7 +337,7 @@ public class TopupCommandServiceImpl implements TopupCommandService {
                                                 String topupIdCache = "topup:id:" + updatedTopup.getTopupId();
                                                 String saldoCardCache = "saldo:card:" + req.getCardNumber();
                                                 String saldoIdCache = "saldo:id:"
-                                                        + saldoResponse.getData().getSaldoId();
+                                                        + saldo.saldoId();
 
                                                 return Uni.combine().all().unis(
                                                         redisService.deleteReactive(topupCardCache),

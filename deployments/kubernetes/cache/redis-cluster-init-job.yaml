@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-init
+  namespace: payment-gateway
+spec:
+  template:
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      containers:
+        - name: redis-cluster-init
+          image: redis:7.4-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              for i in 0 1 2 3 4 5; do
+                until redis-cli -h redis-$i.redis.payment-gateway.svc.cluster.local -a dragon_knight ping > /dev/null 2>&1; do
+                  echo "Waiting for redis-$i to be ready..."
+                  sleep 2
+                done
+              done
+
+              if redis-cli --no-auth-warning -a dragon_knight --cluster check redis-0.redis.payment-gateway.svc.cluster.local:6379 > /dev/null 2>&1; then
+                echo "Redis cluster already initialized and healthy"
+                exit 0
+              fi
+
+              echo "Creating Redis cluster..."
+              echo "yes" | redis-cli --no-auth-warning -a dragon_knight --cluster create \
+              redis-0.redis.payment-gateway.svc.cluster.local:6379 \
+              redis-1.redis.payment-gateway.svc.cluster.local:6379 \
+              redis-2.redis.payment-gateway.svc.cluster.local:6379 \
+              redis-3.redis.payment-gateway.svc.cluster.local:6379 \
+              redis-4.redis.payment-gateway.svc.cluster.local:6379 \
+              redis-5.redis.payment-gateway.svc.cluster.local:6379 \
+              --cluster-replicas 1
+      restartPolicy: OnFailure

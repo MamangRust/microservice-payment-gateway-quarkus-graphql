@@ -3,4 +3,7 @@ kind: Deployment
 metadata:
   name: placeholder
   annotations:
+    # Seluruh workload aplikasi menunggu PostgreSQL (wave -2) dan PgBouncer
+    # (wave -1). Workload infra (Kafka/Redis/ClickHouse/observability) tidak
+    # diberi wave: service sudah menunggunya lewat initContainer.
     argocd.argoproj.io/sync-wave: "2"

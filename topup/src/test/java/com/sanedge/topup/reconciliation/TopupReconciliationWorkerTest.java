@@ -22,13 +22,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.sanedge.common.adapter.model.SaldoMutationResult;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.common.enums.Status;
 import com.sanedge.topup.entity.Topup;
 import com.sanedge.topup.repository.TopupCommandRepository;
 import com.sanedge.topup.repository.TopupQueryRepository;
 
 import io.smallrye.mutiny.Uni;
-import pb.saldo.SaldoCommandService;
 
 @ExtendWith(MockitoExtension.class)
 class TopupReconciliationWorkerTest {
@@ -40,7 +41,7 @@ class TopupReconciliationWorkerTest {
     TopupCommandRepository topupCommandRepository;
 
     @Mock
-    SaldoCommandService saldoCommandService;
+    SaldoPort saldoPort;
 
     private TopupReconciliationWorker worker;
 
@@ -49,7 +50,7 @@ class TopupReconciliationWorkerTest {
         worker = new TopupReconciliationWorker();
         setField("topupQueryRepository", topupQueryRepository);
         setField("topupCommandRepository", topupCommandRepository);
-        setField("saldoCommandService", saldoCommandService);
+        setField("saldoPort", saldoPort);
         // config fields are only read by init()/claims; set sensible values
         setField("enabled", false);
         setField("intervalMs", 30000L);
@@ -79,10 +80,6 @@ class TopupReconciliationWorkerTest {
         return t;
     }
 
-    private pb.saldo.Saldo.ApiResponseSaldo saldoResp(String status) {
-        return pb.saldo.Saldo.ApiResponseSaldo.newBuilder().setStatus(status).build();
-    }
-
     @Test
     void appliesReverseDeltaWithDeterministicKeyAndCompletes() {
         when(topupQueryRepository.findPendingCompensation(5))
@@ -90,19 +87,19 @@ class TopupReconciliationWorkerTest {
         when(topupCommandRepository.claimCompensation(any(Long.class), anyString(), anyString(),
                 any(Timestamp.class), any(Timestamp.class), any(Integer.class)))
                 .thenReturn(Uni.createFrom().item(true));
-        when(saldoCommandService.updateSaldoBalance(any()))
-                .thenReturn(Uni.createFrom().item(saldoResp("success")));
+        when(saldoPort.updateSaldoBalance(any()))
+                .thenReturn(Uni.createFrom().item(new SaldoMutationResult(1, "1234-5678-9012-3456", 0)));
         when(topupCommandRepository.completeCompensation(any(Long.class), anyString(), anyString()))
                 .thenReturn(Uni.createFrom().item(true));
 
         int processed = worker.runCycle().await().indefinitely();
 
         assertThat(processed).isEqualTo(1);
-        ArgumentCaptor<pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest> captor = ArgumentCaptor
-                .forClass(pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest.class);
-        verify(saldoCommandService).updateSaldoBalance(captor.capture());
-        assertThat(captor.getValue().getDeltaBalance()).isEqualTo(-50000);
-        assertThat(captor.getValue().getOperationKey()).isEqualTo("topup-comp:1");
+        ArgumentCaptor<SaldoPort.BalanceUpdate> captor = ArgumentCaptor
+                .forClass(SaldoPort.BalanceUpdate.class);
+        verify(saldoPort).updateSaldoBalance(captor.capture());
+        assertThat(captor.getValue().deltaBalance()).isEqualTo(-50000);
+        assertThat(captor.getValue().operationKey()).isEqualTo("topup-comp:1");
         verify(topupCommandRepository).completeCompensation(eq(1L), eq("topup-reconciliation-worker"), anyString());
     }
 
@@ -113,8 +110,8 @@ class TopupReconciliationWorkerTest {
         when(topupCommandRepository.claimCompensation(any(Long.class), anyString(), anyString(),
                 any(Timestamp.class), any(Timestamp.class), any(Integer.class)))
                 .thenReturn(Uni.createFrom().item(true));
-        when(saldoCommandService.updateSaldoBalance(any()))
-                .thenReturn(Uni.createFrom().item(saldoResp("error")));
+        when(saldoPort.updateSaldoBalance(any()))
+                .thenReturn(Uni.createFrom().failure(new RuntimeException("compensation adapter failed")));
         when(topupCommandRepository.releaseCompensation(any(Long.class), anyString(), anyString(),
                 any(Timestamp.class), anyString()))
                 .thenReturn(Uni.createFrom().item(true));
@@ -143,7 +140,7 @@ class TopupReconciliationWorkerTest {
         int processed = worker.runCycle().await().indefinitely();
 
         assertThat(processed).isEqualTo(1);
-        verify(saldoCommandService, never()).updateSaldoBalance(any());
+        verify(saldoPort, never()).updateSaldoBalance(any());
         verify(topupCommandRepository).completeCompensation(eq(1L), eq("topup-reconciliation-worker"), anyString());
     }
 
@@ -158,7 +155,7 @@ class TopupReconciliationWorkerTest {
         int processed = worker.runCycle().await().indefinitely();
 
         assertThat(processed).isEqualTo(1);
-        verify(saldoCommandService, never()).updateSaldoBalance(any());
+        verify(saldoPort, never()).updateSaldoBalance(any());
         verify(topupCommandRepository, never()).completeCompensation(any(Long.class), anyString(), anyString());
     }
 }

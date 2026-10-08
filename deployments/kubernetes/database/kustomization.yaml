@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 1 database = 1 bounded context. Tiap context punya PostgreSQL sendiri di depan
+# PgBouncer-nya sendiri; service connect lewat DB_<CONTEXT>_HOST (lihat core/configmaps.yaml).
+resources:
+  - postgres-identity.yaml # StatefulSet + headless Service -> pg_identity
+  - pgbouncer-identity.yaml # Deployment + Service
+  - postgres-payment.yaml # StatefulSet + headless Service -> pg_payment
+  - pgbouncer-payment.yaml # Deployment + Service
+  - postgres-financial.yaml # StatefulSet + headless Service -> pg_financial
+  - pgbouncer-financial.yaml # Deployment + Service
+  - clickhouse.yaml # StatefulSet + Service -> OLAP (stats-reader/stats-writer)
+  - clickhouse-schema-configmap.yaml # ConfigMap clickhouse-schema (initdb mount)

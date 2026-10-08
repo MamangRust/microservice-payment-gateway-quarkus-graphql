@@ -2,7 +2,7 @@
 
 A production-grade, highly resilient, and fully observable **microservices payment gateway backend** built in **Java 21** using **Quarkus** reactive framework (v3.31.3). Designed around domain-driven service boundaries following Clean Architecture and CQRS principles, each service runs as an **independent JVM process** with its own gRPC server, database migrations, and caching layer — achieving true service-level isolation and independent deployability.
 
-Each financial and identity business domain — Users, Roles, Cards, Merchants, Saldo, Topups, Transactions, Transfers, Withdrawals — lives in its own self-contained Maven module, running as a **standalone microservice**. These services communicate synchronously via high-performance **gRPC** protocols and asynchronously using **Apache Kafka** event propagation, exposing a unified reactive entry point through a **GraphQL API Gateway** powered by Quarkus SmallRye GraphQL.
+Each financial and identity business domain — Users, Roles, Cards, Merchants, Saldo, Topups, Transactions, Transfers, Withdrawals — lives in its own self-contained Maven module, running as a **standalone microservice**. These services communicate synchronously via high-performance **gRPC** protocols and asynchronously using **Apache Kafka** event propagation, exposing a unified reactive entry point through a **REST API Gateway** powered by Quarkus RESTEasy Reactive.
 
 The platform is fortified with a **comprehensive observability suite** (Prometheus, Grafana, Loki, Jaeger, OpenTelemetry), **distributed Redis caching** with custom telemetry for each service, and Kubernetes configurations ready for production auto-scaling.
 
@@ -12,7 +12,7 @@ The platform is fortified with a **comprehensive observability suite** (Promethe
 
 | Domain | Capabilities |
 | :--- | :--- |
-| **Auth & Users** | Secure registration, multi-factor login, stateless JWT access/refresh token lifecycle, password reset workflows, OTP email verification, and `/me` profile GraphQL query. |
+| **Auth & Users** | Secure registration, multi-factor login, stateless JWT access/refresh token lifecycle, password reset workflows, OTP email verification, and `/me` profile REST endpoint. |
 | **Roles & RBAC** | Custom permission configuration, granular access control matrices, and sub-second permission evaluation cached via Redis. |
 | **Cards & VCC** | Virtual and debit card CRUD operations with soft-delete capabilities, card activation/suspension toggles, and multi-dimensional transaction analytics (daily/monthly/yearly topup, withdraw, transfer). |
 | **Merchants** | Fully featured merchant onboarding, profile details management, business data registration, and merchant performance/transaction reports with full data restoration capabilities (soft delete & restore). |
@@ -31,7 +31,7 @@ The platform is fortified with a **comprehensive observability suite** (Promethe
 
 ## Architecture Overview
 
-The platform implements a **Distributed Microservices** architecture. Each business service is a logical, decoupled, self-contained microservice inside its own Maven submodule, possessing its own independent gRPC boundary. A **Quarkus GraphQL API Gateway** acts as the unified edge router, exposing a single GraphQL schema (queries & mutations) and transforming client GraphQL operations into fast gRPC downstream communications via Quarkus gRPC clients.
+The platform implements a **Distributed Microservices** architecture. Each business service is a logical, decoupled, self-contained microservice inside its own Maven submodule, possessing its own independent gRPC boundary. A **Quarkus REST API Gateway** acts as the unified edge router, transforming client HTTP REST requests into fast gRPC downstream communications via Quarkus gRPC clients.
 
 ### Core Architecture Principles
 
@@ -40,7 +40,7 @@ The platform implements a **Distributed Microservices** architecture. Each busin
 - **Reactive Execution**: Powered entirely by Quarkus reactive engine and Mutiny, enabling high throughput with minimal resource footprints.
 - **Direct DB Connections**: Each service manages its own PostgreSQL connection pool with Agroal, with configurable `max-size` and `acquisition-timeout` per service.
 - **Event-Driven Resilience**: Apache Kafka decouples transaction events, ensuring side effects like email billing remain completely non-blocking.
-- **OTel Telemetry Integration**: Standardized OpenTelemetry middleware injects trace IDs across gRPC boundaries, allowing seamless trace propagation from the client GraphQL gateway down to postgres operations.
+- **OTel Telemetry Integration**: Standardized OpenTelemetry middleware injects trace IDs across gRPC boundaries, allowing seamless trace propagation from the client REST gateway down to postgres operations.
 
 ```mermaid
 graph TB
@@ -53,13 +53,13 @@ graph TB
 
     Client["Client Applications<br/>(Web / Mobile / API)"]:::client
 
-    subgraph APIGateway["API Gateway — NGINX + Quarkus GraphQL Gateway"]
+    subgraph APIGateway["API Gateway — NGINX + Quarkus REST Gateway"]
         direction LR
-        GQL["GraphQL API Handler<br/>Port :5000"]:::gateway
+        REST["REST API Route Handler<br/>Port :5000"]:::gateway
         AuthMW["JWT Auth & Role<br/>Middleware"]:::gateway
     end
 
-    Client -->|"GraphQL over HTTP"| APIGateway
+    Client -->|HTTP REST| APIGateway
 
     subgraph BusinessServices["Microservices (Independent JVM Processes)"]
         direction TB
@@ -92,17 +92,17 @@ graph TB
         end
     end
 
-    GQL -->|"Quarkus gRPC Client"| AUTH
-    GQL -->|"Quarkus gRPC Client"| USER
-    GQL -->|"Quarkus gRPC Client"| ROLE
-    GQL -->|"Quarkus gRPC Client"| MERCH
-    GQL -->|"Quarkus gRPC Client"| CARD
-    GQL -->|"Quarkus gRPC Client"| SALDO
-    GQL -->|"Quarkus gRPC Client"| TOPUP
-    GQL -->|"Quarkus gRPC Client"| TXN
-    GQL -->|"Quarkus gRPC Client"| TRANSFER
-    GQL -->|"Quarkus gRPC Client"| WITHDRAW
-    GQL -->|"Quarkus gRPC Client"| STATS_R
+    REST -->|"Quarkus gRPC Client"| AUTH
+    REST -->|"Quarkus gRPC Client"| USER
+    REST -->|"Quarkus gRPC Client"| ROLE
+    REST -->|"Quarkus gRPC Client"| MERCH
+    REST -->|"Quarkus gRPC Client"| CARD
+    REST -->|"Quarkus gRPC Client"| SALDO
+    REST -->|"Quarkus gRPC Client"| TOPUP
+    REST -->|"Quarkus gRPC Client"| TXN
+    REST -->|"Quarkus gRPC Client"| TRANSFER
+    REST -->|"Quarkus gRPC Client"| WITHDRAW
+    REST -->|"Quarkus gRPC Client"| STATS_R
 
     subgraph Infrastructure["Infrastructure Layer"]
         direction LR
@@ -132,7 +132,7 @@ graph TB
     MERCH -->|"Quarkus Redis Client"| REDIS
     CARD -->|"Quarkus Redis Client"| REDIS
     SALDO -->|"Quarkus Redis Client"| REDIS
-    GQL -->|"Quarkus Redis Client"| REDIS
+    REST -->|"Quarkus Redis Client"| REDIS
     STATS_R -->|"Quarkus Redis Client"| REDIS
 
     subgraph EventConsumers["Event-Driven Consumers"]
@@ -183,7 +183,7 @@ graph TB
     TXN -.->|"/metrics"| PROM
     TRANSFER -.->|"/metrics"| PROM
     WITHDRAW -.->|"/metrics"| PROM
-    GQL -.->|"/metrics"| PROM
+    REST -.->|"/metrics"| PROM
 
     AUTH -.->|"OTLP Spans"| OTEL
     USER -.->|"OTLP Spans"| OTEL
@@ -195,7 +195,7 @@ graph TB
     TXN -.->|"OTLP Spans"| OTEL
     TRANSFER -.->|"OTLP Spans"| OTEL
     WITHDRAW -.->|"OTLP Spans"| OTEL
-    GQL -.->|"OTLP Spans"| OTEL
+    REST -.->|"OTLP Spans"| OTEL
 
     OTEL -.-> JAEGER
     PROMTAIL -.-> LOKI
@@ -223,7 +223,7 @@ graph LR
     classDef stats fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1px,rx:8
 
     subgraph Gateway
-        API["API Gateway<br/>Quarkus GraphQL Router :5000"]:::gw
+        API["API Gateway<br/>Quarkus REST Router :5000"]:::gw
     end
 
     subgraph Identity["Identity & Access (3)"]
@@ -325,20 +325,20 @@ graph TB
 
 ## Data & Event Flow
 
-### Synchronous Flow (GraphQL Proxy & Cache Read-Through)
+### Synchronous Flow (REST Proxy & Cache Read-Through)
 
-All external client API requests go through the GraphQL schema exposed by the Quarkus API Gateway. The API Gateway validates the JWT/API Key, resolves the requested query/mutation against the correct downstream gRPC microservice, checks the Redis cache, and fetches PostgreSQL if a cache miss occurs.
+All external client API requests go through the REST endpoints defined in the Quarkus API Gateway Router. The API Gateway validates the JWT/API Key, connects with the correct downstream gRPC microservice, checks the Redis cache, and fetches PostgreSQL if a cache miss occurs.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Client
-    participant GW as API Gateway<br/>(Quarkus GraphQL Router)
+    participant GW as API Gateway<br/>(Quarkus REST Router)
     participant SVC as Domain Service<br/>(gRPC Server)
     participant REDIS as Redis
     participant DB as PostgreSQL
 
-    C->>GW: GraphQL Query / Mutation (JSON over HTTP POST)
+    C->>GW: HTTP REST Request (GET/POST/PUT)
     GW->>GW: JWT Authentication Check
     GW->>SVC: gRPC Call (Protobuf payload)
     SVC->>REDIS: Check Cache (Redis)
@@ -350,7 +350,7 @@ sequenceDiagram
         SVC->>REDIS: Populate Cache for next read
     end
     SVC-->>GW: gRPC Response payload
-    GW-->>C: GraphQL JSON Response
+    GW-->>C: HTTP REST Response (JSON format)
 ```
 
 ### Asynchronous Flow (Kafka Notification Event pipeline)
@@ -489,7 +489,7 @@ sequenceDiagram
     participant FSC as FraudScoringConsumer (async)
     participant K2 as Kafka card.fraud.alert
 
-    GW->>AUTH: GraphQL mutation authorizeCard
+    GW->>AUTH: POST /api/cards/authorize
     AUTH->>DB: persist txn + risk_score (computeRiskScore)
     alt score > 70
         AUTH->>DB: DECLINED + card BLOCKED (sync)
@@ -681,7 +681,7 @@ flowchart TB
 
         subgraph Gateway["API Gateway"]
             NGINX["NGINX Proxy :80"]:::gateway
-            APIGW["API Gateway Container<br/>Quarkus GraphQL Gateway :5000"]:::gateway
+            APIGW["API Gateway Container<br/>Quarkus REST Gateway :5000"]:::gateway
         end
 
         subgraph Services["Core Service Containers"]
@@ -871,7 +871,7 @@ flowchart TB
             NGINX_POD["nginx-pods"]:::pod
         end
 
-        subgraph GatewayServices["GraphQL API Gateway (Scalable Deployment)"]
+        subgraph GatewayServices["REST API Gateway (Scalable Deployment)"]
             APIGW_SVC["gateway-service<br/>(ClusterIP :8080)"]:::k8sSvc
             APIGW_PODS["gateway-pods"]:::pod
             APIGW_HPA["gateway-hpa"]:::hpa
@@ -1217,7 +1217,7 @@ end
 | Category | Selected Technologies | Purpose |
 | :--- | :--- | :--- |
 | **Language** | Java 21 (Quarkus v3.31.3) | Reactive, non-blocking asynchronous Java execution. |
-| **API Edge Gateway** | Quarkus SmallRye GraphQL | Reactive GraphQL API Gateway router and reverse proxy destination. |
+| **API Edge Gateway** | Quarkus RESTEasy Reactive | Reactive REST API Gateway router and reverse proxy destination. |
 | **RPC Inter-service** | Quarkus gRPC Client & Server | Blazing fast, contract-first synchronous gRPC communication. |
 | **Database** | PostgreSQL v17 | Safe ACID ledger persistent storage system. |
 | **DB Migrations** | Flyway | Incremental database schema version manager run on startup. |
@@ -1300,7 +1300,7 @@ for port in 8091 8086 8085 8084 8087 8088 8089 8090 8093 8092; do
 
 ### 5. Run the Validation Suites
 
-All local test suites live under `deployments/local/tests/`. Functional GraphQL E2E suites (powered by [Hurl](https://hurl.dev)) are in `deployments/local/tests/`, while health/ops and resilience checks are in `deployments/local/tests/checks/`.
+All local test suites live under `deployments/local/tests/`. Functional REST suites (powered by [Hurl](https://hurl.dev)) are in `deployments/local/tests/`, while health/ops and resilience checks are in `deployments/local/tests/checks/`.
 
 ```sh
 # --- Health & resilience checks (deployments/local/tests/checks/) ---
@@ -1329,7 +1329,7 @@ BASE_URL=http://localhost:5000 deployments/local/tests/run-fraud-scoring.sh
 
 | Application/Service | gRPC Port | HTTP Port | Description |
 | :--- | :--- | :--- | :--- |
-| **API Gateway** | — | `5000` | GraphQL API entry point, proxies to gRPC |
+| **API Gateway** | — | `5000` | REST API entry point, proxies to gRPC |
 | **Auth Service** | `9012` | `8092` | JWT authentication & registration |
 | **User Service** | `9011` | `8091` | User profile management |
 | **Role Service** | `9006` | `8086` | RBAC & permission management |
@@ -1376,7 +1376,7 @@ docker-compose -f deployments/local/docker-compose.yml down -v   # stop infrastr
 | `deployments/local/tests/checks/chaos-dependency-check.sh` | Verifies chaos policies, gateway readiness, and control-plane capability. |
 | `deployments/local/tests/checks/rollout-rollback-check.sh` | Validates the Kubernetes manifest contract (ports, probes, migration Job). |
 | `deployments/local/tests/checks/backup-restore-check.sh` | Non-destructive PostgreSQL backup/restore verification (opt-in via `ALLOW_BACKUP_RESTORE_CHECK=true`). |
-| `deployments/local/tests/run-e2e.sh` | Full GraphQL E2E Hurl suite (`e2e.hurl`). |
+| `deployments/local/tests/run-e2e.sh` | Full REST E2E Hurl suite (`e2e.hurl`). |
 | `deployments/local/tests/run-stats.sh` | Stats dashboards Hurl suite (`stats.hurl`, 32 requests). |
 | `deployments/local/tests/run-credit-lifecycle.sh` | Credit lifecycle Hurl suite (`credit-lifecycle.hurl`). |
 | `deployments/local/tests/run-fraud-scoring.sh` | Fraud scoring Hurl suite (`fraud-scoring.hurl`). |
@@ -1394,7 +1394,7 @@ quarkus-payment-gateway/
 │       ├── cache/                  #   StatsCache (ClickHouse)
 │       ├── grpc/                   #   GrpcErrorMapper
 │       └── entity/                 #   BaseModel (Panache base)
-├── gateway/                        # GraphQL API Gateway (GraphQL → gRPC proxy, port :5000)
+├── gateway/                        # REST API Gateway (HTTP → gRPC proxy, port :5000)
 ├── auth/                           # Auth Service — JWT & registration (gRPC :9012)
 ├── user/                           # User Service — profiles (gRPC :9011)
 ├── role/                           # Role Service — RBAC (gRPC :9006)
@@ -1418,7 +1418,7 @@ quarkus-payment-gateway/
 │   │   ├── run-host-java.sh        #   Launch Java services on the host (start/stop)
 │   │   ├── build-image.sh          #   Batch Docker image builder
 │   │   └── tests/                  #   Local validation suites
-│   │       ├── run-e2e.sh          #     GraphQL E2E Hurl suite
+│   │       ├── run-e2e.sh          #     REST E2E Hurl suite
 │   │       ├── run-stats.sh        #     Stats Hurl suite
 │   │       └── checks/             #     Health/ops & resilience checks
 │   │           ├── smoke.sh

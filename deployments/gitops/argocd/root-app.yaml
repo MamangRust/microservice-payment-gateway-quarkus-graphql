@@ -10,9 +10,9 @@ metadata:
 spec:
   project: payment-gateway
   source:
-    repoURL: https://github.com/MamangRust/modular-monolith-payment-gateway-quarkus.git
+    repoURL: https://github.com/MamangRust/microservice-payment-gateway-grpc.git
     targetRevision: main
-    path: deployments/gitops/argocd/apps
+    path: deployments/gitops/argocd/production
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

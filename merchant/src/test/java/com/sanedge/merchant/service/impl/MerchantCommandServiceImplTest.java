@@ -3,6 +3,7 @@ package com.sanedge.merchant.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -42,13 +43,14 @@ import com.sanedge.merchant.repository.MerchantQueryRepository;
 
 import io.opentelemetry.api.common.Attributes;
 import io.smallrye.mutiny.Uni;
-import pb.user.UserQueryService;
+import com.sanedge.common.adapter.model.User;
+import com.sanedge.common.adapter.user.UserPort;
 
 @ExtendWith(MockitoExtension.class)
 class MerchantCommandServiceImplTest {
 
     @Mock
-    private UserQueryService userQueryService;
+    private UserPort userPort;
 
     @Mock
     private MerchantQueryRepository merchantQueryRepo;
@@ -80,7 +82,7 @@ class MerchantCommandServiceImplTest {
         }).when(tracingMetrics).traceAndMeasure(anyString(), anyString(), any());
 
         service = new MerchantCommandServiceImpl(
-                userQueryService,
+                userPort,
                 merchantQueryRepo,
                 merchantCommandRepo,
                 redisService,
@@ -143,10 +145,7 @@ class MerchantCommandServiceImplTest {
         @Test
         void success() {
             CreateMerchantRequest req = createReq("New Merchant", 10L);
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(10).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(1, null, null, null, null, null)));
             when(merchantQueryRepo.existsByName(anyString())).thenReturn(Uni.createFrom().item(false));
             Merchant persisted = createPersistedMerchant(1L, "New Merchant", "dummy-key");
             when(merchantCommandRepo.persist(any(Merchant.class))).thenReturn(Uni.createFrom().item(persisted));
@@ -160,7 +159,7 @@ class MerchantCommandServiceImplTest {
         @Test
         void userNotFound_throwsException() {
             CreateMerchantRequest req = createReq("Merchant", 99L);
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().nullItem());
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().failure(new ResourceNotFoundException("User not found")));
             try {
                 service.createMerchant(req).await().indefinitely();
                 org.assertj.core.api.Assertions.fail("Expected ResourceNotFoundException");
@@ -172,10 +171,7 @@ class MerchantCommandServiceImplTest {
         @Test
         void nameAlreadyExists_throwsException() {
             CreateMerchantRequest req = createReq("Existing", 10L);
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(10).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(1, null, null, null, null, null)));
             when(merchantQueryRepo.existsByName("Existing")).thenReturn(Uni.createFrom().item(true));
             try {
                 service.createMerchant(req).await().indefinitely();
@@ -195,10 +191,7 @@ class MerchantCommandServiceImplTest {
             Merchant existing = createMerchant(1L, "Old", "old-key");
             when(merchantQueryRepo.findMerchantById(1L)).thenReturn(Uni.createFrom().item(existing));
 
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(100).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(1, null, null, null, null, null)));
             when(merchantCommandRepo.persist(any(Merchant.class)))
                     .thenReturn(Uni.createFrom().item(createPersistedMerchant(1L, "Updated", "old-key")));
 
@@ -224,7 +217,7 @@ class MerchantCommandServiceImplTest {
             UpdateMerchantRequest req = updateReq(1L, "Y", 200L, "SUCCESS");
             Merchant existing = createMerchant(1L, "Old", "key");
             when(merchantQueryRepo.findMerchantById(1L)).thenReturn(Uni.createFrom().item(existing));
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().nullItem());
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().failure(new ResourceNotFoundException("User not found")));
             try {
                 service.updateMerchant(req).await().indefinitely();
                 org.assertj.core.api.Assertions.fail("Expected ResourceNotFoundException");

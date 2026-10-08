@@ -1,0 +1,39 @@
+# Local-dev override for running the Go services on the host while keeping
+# all infrastructure in docker.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d \
+#     postgres_identity pgbouncer_identity postgres_payment pgbouncer_payment \
+#     postgres_financial pgbouncer_financial \
+#     redis-local clickhouse kafka-1 \
+#     otel-collector jaeger prometheus grafana loki alertmanager \
+#     --profile monitoring
+#
+# Notes:
+# - Tiga bounded context PostgreSQL (identity/payment/financial) masing-masing
+#   di depan PgBouncer; base compose memetakan port host 6432/6433/6434, jadi
+#   host-run services connect lewat .env (DB_<CONTEXT>_HOST=localhost).
+# - redis-local is a single-node redis on host port 6379.
+services:
+  # Host-run clients connect via localhost:9092. The base compose advertises
+  # PLAINTEXT://kafka-1:9092 (docker-internal hostname), which host processes
+  # cannot resolve after the first metadata fetch (sarama reconnects to the
+  # advertised address) -> "lookup kafka-1 ... server misbehaving".
+  # Override the advertised listener to localhost so host clients stay on it.
+  kafka-1:
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+
+  redis-local:
+    image: redis:7.4-alpine
+    container_name: redis-local
+    command: ["redis-server", "--requirepass", "dragon_knight"]
+    ports:
+      - "6379:6379"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "dragon_knight", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

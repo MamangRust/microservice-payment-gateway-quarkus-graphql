@@ -3,6 +3,7 @@ package com.sanedge.card.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -35,6 +36,8 @@ import com.sanedge.card.entity.Card.CardStatus;
 import com.sanedge.card.repository.CardCommandRepository;
 import com.sanedge.card.repository.CardQueryRepository;
 import com.sanedge.card.service.KafkaService;
+import com.sanedge.common.adapter.model.User;
+import com.sanedge.common.adapter.user.UserPort;
 import com.sanedge.common.domain.response.ApiResponse;
 import com.sanedge.common.exception.InvalidRequestException;
 import com.sanedge.common.exception.ResourceNotFoundException;
@@ -45,7 +48,6 @@ import io.smallrye.mutiny.Uni;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Path;
 import jakarta.validation.Validator;
-import pb.user.UserQueryService;
 
 @ExtendWith(MockitoExtension.class)
 class CardCommandImplServiceTest {
@@ -57,7 +59,7 @@ class CardCommandImplServiceTest {
     private CardQueryRepository cardQueryRepository;
 
     @Mock
-    private UserQueryService userQueryService;
+    private UserPort userPort;
 
     @Mock
     private KafkaService kafkaService;
@@ -79,7 +81,7 @@ class CardCommandImplServiceTest {
         service = new CardCommandImplService();
         service.cardCommandRepository = cardCommandRepository;
         service.cardQueryRepository = cardQueryRepository;
-        service.userQueryService = userQueryService;
+        service.userPort = userPort;
         service.kafkaService = kafkaService;
         service.outboxRepository = outboxRepository;
         service.validator = validator;
@@ -147,10 +149,7 @@ class CardCommandImplServiceTest {
         @Test
         void success() {
             CreateCardRequest req = createCardReq();
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(100).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(100, null, null, null, null, null)));
             when(cardCommandRepository.persist(any(Card.class))).thenAnswer(inv -> {
                 Card c = inv.getArgument(0);
                 c.setCardId(10L);
@@ -166,7 +165,7 @@ class CardCommandImplServiceTest {
         @Test
         void userNotFound_returnsError() {
             CreateCardRequest req = createCardReq();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().nullItem());
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().failure(new ResourceNotFoundException("User not found: 100")));
             ApiResponse<CardResponse> resp = service.createCard(req).await().indefinitely();
             assertThat(resp.status()).isEqualTo("error");
             assertThat(resp.message()).contains("User not found");
@@ -195,10 +194,7 @@ class CardCommandImplServiceTest {
         @Test
         void success() {
             UpdateCardRequest req = updateCardReq();
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(100).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(100, null, null, null, null, null)));
             when(cardQueryRepository.findById(1L)).thenReturn(Uni.createFrom().item(createMockCard(1L)));
             when(cardCommandRepository.persist(any(Card.class)))
                     .thenAnswer(inv -> Uni.createFrom().item((Card) inv.getArgument(0)));
@@ -211,10 +207,7 @@ class CardCommandImplServiceTest {
         @Test
         void cardNotFound_returnsError() {
             UpdateCardRequest req = updateCardReq();
-            pb.user.User.ApiResponseUser userResp = pb.user.User.ApiResponseUser.newBuilder()
-                    .setData(pb.user.User.UserResponse.newBuilder().setId(100).build())
-                    .build();
-            when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+            when(userPort.findById(anyInt())).thenReturn(Uni.createFrom().item(new User(100, null, null, null, null, null)));
             when(cardQueryRepository.findById(1L)).thenReturn(Uni.createFrom().nullItem());
 
             ApiResponse<CardResponse> resp = service.updateCard(req).await().indefinitely();

@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-ui-ingress
+  namespace: payment-gateway
+spec:
+  # Satu-satunya Service bertipe LoadBalancer yang memang harus dijangkau dari
+  # luar cluster. Pod aplikasi & database tetap ClusterIP, jadi tidak perlu
+  # dibuka.
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - nginx
+          - grafana
+          - jaeger
+          - prometheus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 80 # nginx
+        - protocol: TCP
+          port: 3000 # grafana
+        - protocol: TCP
+          port: 16686 # jaeger UI
+        - protocol: TCP
+          port: 14250 # jaeger collector
+        - protocol: TCP
+          port: 9090 # prometheus

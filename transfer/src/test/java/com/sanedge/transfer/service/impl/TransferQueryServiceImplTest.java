@@ -43,9 +43,11 @@ import com.sanedge.transfer.service.KafkaService;
 import io.opentelemetry.api.common.Attributes;
 import io.smallrye.mutiny.Uni;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Card;
+import com.sanedge.common.adapter.model.Saldo;
+import com.sanedge.common.adapter.model.SaldoMutationResult;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 
 @ExtendWith(MockitoExtension.class)
 class TransferCommandServiceImplTest {
@@ -60,13 +62,10 @@ class TransferCommandServiceImplTest {
         private TransferCommandRepository transferCommandRepo;
 
         @Mock
-        private CardQueryService cardQueryService;
+        private CardPort cardPort;
 
         @Mock
-        private SaldoQueryService saldoQueryService;
-
-        @Mock
-        private SaldoCommandService saldoCommandService;
+        private SaldoPort saldoPort;
 
         @Mock
         private Validator validator;
@@ -86,9 +85,8 @@ class TransferCommandServiceImplTest {
         void setUp() {
                 service = new TransferCommandServiceImpl(
                                 transferCommandRepo,
-                                cardQueryService,
-                                saldoQueryService,
-                                saldoCommandService,
+                                cardPort,
+                                saldoPort,
                                 transferQueryRepo,
                                 validator,
                                 redisService,
@@ -151,35 +149,21 @@ class TransferCommandServiceImplTest {
         }
 
         private void mockCardAndSaldoServices() {
-                pb.card.Card.CardWithEmailResponse senderCardResp = pb.card.Card.CardWithEmailResponse
-                                .newBuilder()
-                                .setCardNumber("111122223333")
-                                .setEmail("test@test.com")
-                                .build();
-                lenient().when(cardQueryService.findUserCardByCardNumber(any()))
-                                .thenReturn(Uni.createFrom().item(senderCardResp));
+                lenient().when(cardPort.findUserCardByCardNumber(any()))
+                                .thenReturn(Uni.createFrom().item(new Card(1, 100, "111122223333",
+                                                null, null, null, null, "test@test.com", null, null)));
 
-                pb.card.Card.CardResponse receiverCardData = pb.card.Card.CardResponse.newBuilder()
-                                .setCardNumber("444455556666")
-                                .build();
-                pb.card.Card.ApiResponseCard receiverCardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                .setData(receiverCardData)
-                                .build();
-                lenient().when(cardQueryService.findByCardNumber(any()))
-                                .thenReturn(Uni.createFrom().item(receiverCardResp));
+                lenient().when(cardPort.findCardByCardNumber(any()))
+                                .thenReturn(Uni.createFrom().item(new Card(2, 200, "444455556666",
+                                                null, null, null, null, null, null, null)));
 
-                pb.saldo.Saldo.SaldoResponse senderSaldoResp = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                .setCardNumber("111122223333")
-                                .setTotalBalance(500000)
-                                .build();
-                pb.saldo.Saldo.ApiResponseSaldo apiSaldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(senderSaldoResp)
-                                .build();
-                lenient().when(saldoQueryService.findByCardNumber(any()))
-                                .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                lenient().when(saldoPort.findByCardNumber(any()))
+                                .thenReturn(Uni.createFrom().item(new Saldo(99, "111122223333",
+                                                500000, null, null, null, null)));
 
-                lenient().when(saldoCommandService.updateSaldoBalance(any()))
-                                .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                lenient().when(saldoPort.updateSaldoBalance(any()))
+                                .thenReturn(Uni.createFrom().item(new SaldoMutationResult(99,
+                                                "111122223333", 350000)));
 
                 lenient().when(kafkaService.sendMessage(anyString(), anyString(), any()))
                                 .thenReturn(Uni.createFrom().voidItem());
@@ -286,20 +270,15 @@ class TransferCommandServiceImplTest {
                         when(transferQueryRepo.findTransferById(1L))
                                         .thenReturn(Uni.createFrom().item(existingTransfer));
 
-                        // Mock saldo query service for update flow
-                        pb.saldo.Saldo.SaldoResponse saldoResp = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setCardNumber("111122223333")
-                                        .setTotalBalance(500000)
-                                        .build();
-                        pb.saldo.Saldo.ApiResponseSaldo apiSaldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                        .setData(saldoResp)
-                                        .build();
-                        when(saldoQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo port for update flow
+                        when(saldoPort.findByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Saldo(99, "111122223333",
+                                                500000, null, null, null, null)));
 
-                        // Mock saldo command service
-                        when(saldoCommandService.updateSaldoBalance(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo command port
+                        when(saldoPort.updateSaldoBalance(any()))
+                                        .thenReturn(Uni.createFrom().item(new SaldoMutationResult(99,
+                                                "111122223333", 350000)));
 
                         when(transferCommandRepo.updateTransferStatus(anyLong(), anyString()))
                                         .thenAnswer(inv -> {

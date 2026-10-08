@@ -26,16 +26,15 @@ import com.sanedge.transfer.repository.TransferQueryRepository;
 import com.sanedge.transfer.service.TransferCommandService;
 
 import io.opentelemetry.api.common.Attributes;
-import io.quarkus.grpc.GrpcClient;
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Saldo;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.transfer.service.KafkaService;
 import io.vertx.core.json.JsonObject;
 
@@ -44,9 +43,8 @@ public class TransferCommandServiceImpl implements TransferCommandService {
         private static final Logger logger = LoggerFactory.getLogger(TransferCommandServiceImpl.class);
 
         private final TransferCommandRepository transferCommandRepository;
-        private final CardQueryService cardQueryService;
-        private final SaldoQueryService saldoQueryService;
-        private final SaldoCommandService saldoCommandService;
+        private final CardPort cardPort;
+        private final SaldoPort saldoPort;
         private final TransferQueryRepository transferQueryRepository;
         private final Validator validator;
         private final RedisService redisService;
@@ -56,9 +54,8 @@ public class TransferCommandServiceImpl implements TransferCommandService {
 
         @Inject
         public TransferCommandServiceImpl(TransferCommandRepository transferCommandRepository,
-                        @GrpcClient("card") CardQueryService cardQueryService,
-                        @GrpcClient("saldo") SaldoQueryService saldoQueryService,
-                        @GrpcClient("saldo") SaldoCommandService saldoCommandService,
+                        CardPort cardPort,
+                        SaldoPort saldoPort,
                         TransferQueryRepository transferQueryRepository,
                         Validator validator,
                         RedisService redisService,
@@ -66,9 +63,8 @@ public class TransferCommandServiceImpl implements TransferCommandService {
                         TracingMetrics tracingMetrics,
                         OutboxRepository outboxRepository) {
                 this.transferCommandRepository = transferCommandRepository;
-                this.cardQueryService = cardQueryService;
-                this.saldoQueryService = saldoQueryService;
-                this.saldoCommandService = saldoCommandService;
+                this.cardPort = cardPort;
+                this.saldoPort = saldoPort;
                 this.transferQueryRepository = transferQueryRepository;
                 this.validator = validator;
                 this.redisService = redisService;
@@ -184,69 +180,27 @@ public class TransferCommandServiceImpl implements TransferCommandService {
 
                 return tracingMetrics.traceAndMeasure("createTransfer", "create_transfer", attrs, () -> {
                         final String[] senderEmailContainer = new String[1];
-                        return cardQueryService
-                                        .findUserCardByCardNumber(
-                                                        pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                                                        .setCardNumber(req.getTransferFrom()).build())
-                                        .chain(senderCardResponse -> {
-                                                if (senderCardResponse == null
-                                                                || senderCardResponse.getCardNumber() == null
-                                                                || senderCardResponse.getCardNumber().isEmpty()) {
-                                                        logger.error("Sender card {} not found", req.getTransferFrom());
-                                                        throw new ResourceNotFoundException("Sender card not found");
-                                                }
-                                                senderEmailContainer[0] = senderCardResponse.getEmail();
-                                                return cardQueryService.findByCardNumber(
-                                                                pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                                                                .setCardNumber(req.getTransferTo())
-                                                                                .build());
+                        return cardPort
+                                        .findUserCardByCardNumber(req.getTransferFrom())
+                                        .chain(senderCard -> {
+                                                senderEmailContainer[0] = senderCard.email();
+                                                return cardPort.findCardByCardNumber(req.getTransferTo());
                                         })
-                                        .chain(receiverCardResponse -> {
-                                                if (receiverCardResponse == null || !receiverCardResponse.hasData()) {
-                                                        logger.error("Receiver card {} not found", req.getTransferTo());
-                                                        throw new ResourceNotFoundException("Receiver card not found");
-                                                }
-                                                return saldoQueryService.findByCardNumber(
-                                                                pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                                                                .setCardNumber(req.getTransferFrom())
-                                                                                .build());
-                                        })
-                                        .chain(senderSaldoResponse -> {
-                                                if (senderSaldoResponse == null || !senderSaldoResponse.hasData()) {
-                                                        logger.error("Failed to fetch sender saldo");
-                                                        throw new ResourceNotFoundException("Sender saldo not found");
-                                                }
-                                                pb.saldo.Saldo.SaldoResponse senderSaldo = senderSaldoResponse
-                                                                .getData();
-                                                return saldoQueryService
-                                                                .findByCardNumber(pb.card.Card.FindByCardNumberRequest
-                                                                                .newBuilder()
-                                                                                .setCardNumber(req.getTransferTo())
-                                                                                .build())
-                                                                .map(receiverSaldoResponse -> {
-                                                                        if (receiverSaldoResponse == null
-                                                                                        || !receiverSaldoResponse
-                                                                                                        .hasData()) {
-                                                                                logger.error("Failed to fetch receiver saldo");
-                                                                                throw new ResourceNotFoundException(
-                                                                                                "Receiver saldo not found");
-                                                                        }
-                                                                        pb.saldo.Saldo.SaldoResponse receiverSaldo = receiverSaldoResponse
-                                                                                        .getData();
+                                        .chain(receiverCard -> saldoPort.findByCardNumber(req.getTransferFrom()))
+                                        .chain(senderSaldo -> saldoPort
+                                                        .findByCardNumber(req.getTransferTo())
+                                                        .map(receiverSaldo -> {
+                                                                if (senderSaldo.totalBalance() < req
+                                                                                .getTransferAmount()) {
+                                                                        logger.error("Insufficient balance, requested={}, available={}",
+                                                                                        req.getTransferAmount(),
+                                                                                        senderSaldo.totalBalance());
+                                                                        throw new IllegalStateException(
+                                                                                        "Insufficient balance");
+                                                                }
 
-                                                                        if (senderSaldo.getTotalBalance() < req
-                                                                                        .getTransferAmount()) {
-                                                                                logger.error("Insufficient balance, requested={}, available={}",
-                                                                                                req.getTransferAmount(),
-                                                                                                senderSaldo.getTotalBalance());
-                                                                                throw new IllegalStateException(
-                                                                                                "Insufficient balance");
-                                                                        }
-
-                                                                        return new SaldoPair(senderSaldo,
-                                                                                        receiverSaldo);
-                                                                });
-                                        })
+                                                                return new SaldoPair(senderSaldo, receiverSaldo);
+                                                        }))
                                         .chain(pair -> {
                                                 Transfer transferEntity = new Transfer();
                                                 transferEntity.setTransferNo(UUID.randomUUID());
@@ -274,42 +228,30 @@ public class TransferCommandServiceImpl implements TransferCommandService {
 
                                                 return transferCommandRepository.persist(transferEntity)
                                                                 .chain(savedTransfer -> {
-                                                                        int newSenderBalance = pair.sender
-                                                                                        .getTotalBalance()
-                                                                                        - req.getTransferAmount()
-                                                                                                        .intValue();
-                                                                        int newReceiverBalance = pair.receiver
-                                                                                        .getTotalBalance()
-                                                                                        + req.getTransferAmount()
-                                                                                                        .intValue();
+                                                                        int newSenderBalance = pair.sender.totalBalance()
+                                                                                        - req.getTransferAmount().intValue();
+                                                                        int newReceiverBalance = pair.receiver.totalBalance()
+                                                                                        + req.getTransferAmount().intValue();
 
-                                                                        return saldoCommandService
-                                                                                        .updateSaldoBalance(
-                                                                                                        pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                        .newBuilder()
-                                                                                                                        .setCardNumber(pair.sender
-                                                                                                                                        .getCardNumber()).setTotalBalance(
-                                                                                                                                                        newSenderBalance)
-                                                                                                                                                .setDeltaBalance(-req.getTransferAmount().intValue())
-                                                                                                                                                .setMinimumBalance(0)
-                                                                                                                                                .setOperationKey(saldoOperationKey("trf", req.getIdempotencyKey(), "sender"))
-                                                                                                                                                .build())
+                                                                        return saldoPort
+                                                                                        .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                        pair.sender.cardNumber(),
+                                                                                                        newSenderBalance,
+                                                                                                        -req.getTransferAmount().intValue(),
+                                                                                                        0, null, null,
+                                                                                                        saldoOperationKey("trf", req.getIdempotencyKey(), "sender")))
                                                                                         .chain(v -> {
                                                                                                 transferEntity.setCompensationLegAApplied(true);
                                                                                                 return transferCommandRepository.persist(transferEntity);
                                                                                         })
-                                                                                        .chain(v -> saldoCommandService
-                                                                                                        .updateSaldoBalance(
-                                                                                                                        pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                        .newBuilder()
-                                                                                                                                        .setCardNumber(pair.receiver
-                                                                                                                                                        .getCardNumber()).setTotalBalance(
-                                                                                                                                                                                newReceiverBalance)
-                                                                                                                                                                                .setDeltaBalance(req.getTransferAmount().intValue())
-                                                                                                                                                                                .setMinimumBalance(0)
-                                                                                                                                                                                .setOperationKey(saldoOperationKey("trf", req.getIdempotencyKey(), "receiver"))
-                                                                                                                                                                                .build())
-                                                                                                                                                                                .chain(v2 -> {
+                                                                                        .chain(v -> saldoPort
+                                                                                                        .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                        pair.receiver.cardNumber(),
+                                                                                                                        newReceiverBalance,
+                                                                                                                        req.getTransferAmount().intValue(),
+                                                                                                                        0, null, null,
+                                                                                                                        saldoOperationKey("trf", req.getIdempotencyKey(), "receiver")))
+                                                                                                        .chain(v2 -> {
                                                                                                                                                                                         transferEntity.setCompensationLegBApplied(true);
                                                                                                                                                                                         return transferCommandRepository.persist(transferEntity);
                                                                                                                                                                                 }))
@@ -374,10 +316,10 @@ public class TransferCommandServiceImpl implements TransferCommandService {
         }
 
         private static class SaldoPair {
-                final pb.saldo.Saldo.SaldoResponse sender;
-                final pb.saldo.Saldo.SaldoResponse receiver;
+                final Saldo sender;
+                final Saldo receiver;
 
-                SaldoPair(pb.saldo.Saldo.SaldoResponse sender, pb.saldo.Saldo.SaldoResponse receiver) {
+                SaldoPair(Saldo sender, Saldo receiver) {
                         this.sender = sender;
                         this.receiver = receiver;
                 }
@@ -409,32 +351,16 @@ public class TransferCommandServiceImpl implements TransferCommandService {
                                                 long amountDifference = req.getTransferAmount()
                                                                 - transfer.getTransferAmount();
 
-                                                return saldoQueryService
-                                                                .findByCardNumber(pb.card.Card.FindByCardNumberRequest
-                                                                                .newBuilder()
-                                                                                .setCardNumber(transfer
-                                                                                                .getTransferFrom())
-                                                                                .build())
-                                                                .chain(senderSaldoResponse -> {
-                                                                        if (senderSaldoResponse == null
-                                                                                        || !senderSaldoResponse
-                                                                                                        .hasData()) {
-                                                                                return transferCommandRepository
-                                                                                                .updateTransferStatus(
-                                                                                                                req.getTransferId(),
-                                                                                                                "FAILED")
-                                                                                                .chain(v -> {
-                                                                                                        throw new ResourceNotFoundException(
-                                                                                                                        "Sender card " + transfer
-                                                                                                                                        .getTransferFrom()
-                                                                                                                                        + " not found");
-                                                                                                });
-                                                                        }
-                                                                        pb.saldo.Saldo.SaldoResponse senderSaldo = senderSaldoResponse
-                                                                                        .getData();
-
-                                                                        long newSenderBalance = senderSaldo
-                                                                                        .getTotalBalance()
+                                                return saldoPort
+                                                                .findByCardNumber(transfer.getTransferFrom())
+                                                                .onFailure(ResourceNotFoundException.class)
+                                                                .recoverWithUni(e -> transferCommandRepository
+                                                                                .updateTransferStatus(req.getTransferId(), "FAILED")
+                                                                                .chain(v -> Uni.createFrom()
+                                                                                                .failure(new ResourceNotFoundException(
+                                                                                                                "Sender card " + transfer.getTransferFrom() + " not found"))))
+                                                                .chain(senderSaldo -> {
+                                                                        long newSenderBalance = senderSaldo.totalBalance()
                                                                                         - amountDifference;
                                                                         if (newSenderBalance < 0) {
                                                                                 logger.error("Insufficient balance for sender {}",
@@ -449,53 +375,29 @@ public class TransferCommandServiceImpl implements TransferCommandService {
                                                                                                 });
                                                                         }
 
-                                                                        return saldoQueryService
-                                                                                        .findByCardNumber(
-                                                                                                        pb.card.Card.FindByCardNumberRequest
-                                                                                                                        .newBuilder()
-                                                                                                                        .setCardNumber(transfer
-                                                                                                                                        .getTransferTo())
-                                                                                                                        .build())
-                                                                                        .chain(receiverSaldoResponse -> {
-                                                                                                if (receiverSaldoResponse == null
-                                                                                                                || !receiverSaldoResponse
-                                                                                                                                .hasData()) {
-                                                                                                        return transferCommandRepository
-                                                                                                                        .updateTransferStatus(
-                                                                                                                                        req.getTransferId(),
-                                                                                                                                        "FAILED")
-                                                                                                                        .chain(v -> {
-                                                                                                                                throw new ResourceNotFoundException(
-                                                                                                                                                "Receiver card " + transfer
-                                                                                                                                                                .getTransferTo()
-                                                                                                                                                                + " not found");
-                                                                                                                        });
-                                                                                                }
-                                                                                                pb.saldo.Saldo.SaldoResponse receiverSaldo = receiverSaldoResponse
-                                                                                                                .getData();
-
+                                                                        return saldoPort
+                                                                                        .findByCardNumber(transfer.getTransferTo())
+                                                                                        .onFailure(ResourceNotFoundException.class)
+                                                                                        .recoverWithUni(e -> transferCommandRepository
+                                                                                                        .updateTransferStatus(req.getTransferId(), "FAILED")
+                                                                                                        .chain(v -> Uni.createFrom()
+                                                                                                                        .failure(new ResourceNotFoundException(
+                                                                                                                                        "Receiver card " + transfer.getTransferTo() + " not found"))))
+                                                                                        .chain(receiverSaldo -> {
                                                                                                 long newReceiverBalance = receiverSaldo
-                                                                                                                .getTotalBalance()
+                                                                                                                .totalBalance()
                                                                                                                 + amountDifference;
 
-                                                                                                return saldoCommandService
-                                                                                                                .updateSaldoBalance(
-                                                                                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                .newBuilder()
-                                                                                                                                                .setCardNumber(senderSaldo
-                                                                                                                                                                .getCardNumber())
-                                                                                                                                                .setTotalBalance(
-                                                                                                                                                                (int) newSenderBalance)
-                                                                                                                                                .build())
-                                                                                                                .chain(v -> saldoCommandService
-                                                                                                                                .updateSaldoBalance(
-                                                                                                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                                .newBuilder()
-                                                                                                                                                                .setCardNumber(receiverSaldo
-                                                                                                                                                                                .getCardNumber())
-                                                                                                                                                                .setTotalBalance(
-                                                                                                                                                                                (int) newReceiverBalance)
-                                                                                                                                                                .build()))
+                                                                                                return saldoPort
+                                                                                                                .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                                senderSaldo.cardNumber(),
+                                                                                                                                (int) newSenderBalance,
+                                                                                                                                null, null, null, null, null))
+                                                                                                                .chain(v -> saldoPort
+                                                                                                                                .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                                                receiverSaldo.cardNumber(),
+                                                                                                                                                (int) newReceiverBalance,
+                                                                                                                                                null, null, null, null, null)))
                                                                                                                 .chain(v -> {
                                                                                                                         transfer.setTransferAmount(
                                                                                                                                         req.getTransferAmount()

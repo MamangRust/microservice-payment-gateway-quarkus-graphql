@@ -1,26 +1,21 @@
-# ArgoCD App-of-Apps — Child Applications
+# ArgoCD Applications
 
-The root Application [`payment-gateway-root`](../root-app.yaml) manages every
-child `Application` in this directory. Each child maps to a Kustomize base (or a
-per-module production overlay) under `deployments/kubernetes/`.
+This directory intentionally contains no ArgoCD Application manifests.
 
-## Sync Waves
+The ArgoCD app-of-apps is a **single application**: `payment-gateway-production`
+(defined in `../production/production.yaml`), which points to
+`deployments/kubernetes/overlays/production`. That overlay renders the entire
+stack (`deployments/kubernetes` category folders) with the production image
+overrides (`newTag` in `images:`) and the `GHCR_OWNER` templating.
 
-Sync waves (`argocd.argoproj.io/sync-wave`) sequence the rollout so database
-migrations complete before domain services start:
+The overlay is the only entrypoint that produces pullable image references:
+the base manifests write `ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/<svc>`
+and the `replacements` block substitutes the real owner from
+`app-config/GHCR_OWNER`. Applying the root `deployments/kubernetes` directly
+leaves the placeholder in place, so it must not be used for application
+workloads.
 
-| Wave | Applications |
-| ---- | ------------ |
-| 1 | `common`, `infra-postgres`, `infra-redis`, `infra-kafka` |
-| 2 | `pgbouncer`, `service-auth`, `service-user`, `service-role`, `service-card`, `service-merchant`, `service-saldo`, `service-email-service` |
-| 3 | `service-topup`, `service-transfer`, `service-withdraw`, `service-transaction` |
-| 5 | `service-gateway`, `nginx` |
-| 6 | `service-observability` |
-
-## Paths
-
-- **Infra / shared** (`common`, `infra-*`, `pgbouncer`, `nginx`, `service-observability`):
-  point directly at `deployments/kubernetes/base/<dir>`.
-- **Domain services** (`service-*`): point at per-module overlays
-  `deployments/kubernetes/overlays/production/<module>/` which pin the image tag,
-  substitute the GHCR owner, and attach the `ghcr-pull-secret` image pull secret.
+Adding a new service requires no new ArgoCD Application — drop its folder under
+`deployments/kubernetes/services/`, list it in `services/kustomization.yaml`,
+and add its image to the overlay's `images:` block; it is picked up
+automatically via the root/overlay.

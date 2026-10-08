@@ -1,48 +1,74 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Entrypoint production (ArgoCD): path ini yang dipakai
+# deployments/gitops/argocd/production/production.yaml.
+#
+# Root `deployments/kubernetes` sengaja TIDAK dirujuk langsung (`resources:
+# [../..]`) — kustomize menolak overlay yang menunjuk ancestor-nya sendiri
+# (cycle detected), dan load restrictor-nya melarang overlay memuat file biasa
+# di luar direktorinya. Karena itu tiap folder kategori didaftarkan eksplisit,
+# dan `namespace.yaml` ikut lewat `core/`.
+
 namespace: payment-gateway
 
 resources:
-  - ../../base
-  - dns-egress.yaml
-  - email-smtp-egress.yaml
+  - ../../core
+  - ../../security
+  - ../../database
+  - ../../messaging
+  - ../../cache
+  - ../../observability
+  - ../../networking
+  - ../../services
 
+# Image aplikasi. Manifest hanya menulis placeholder `__GHCR_OWNER__`; blok
+# `replacements` di bawah mengganti segmen owner dari app-config/GHCR_OWNER.
+#
+# newTag sengaja `latest`: CI (.github/workflows/build_and_push.yaml) baru
+# mem-publish tag `latest` + tag branch/semver, belum ada tag commit SHA.
+# Blok ini tetap ditulis supaya saat CI mulai mem-pin SHA immutable, satu-satunya
+# tempat yang perlu diubah sudah ada di sini (pola yang sama dengan repo saudara).
 images:
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/gateway
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/ai-security
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/auth
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/apigateway
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/user
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/auth
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/role
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/card
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/card
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/email
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/merchant
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/merchant
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/saldo
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/role
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/topup
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/saldo
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/transaction
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/stats-reader
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/transfer
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/stats-writer
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/withdraw
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/topup
     newTag: latest
-  - name: ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/email-service
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/transaction
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/transfer
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/user
+    newTag: latest
+  - name: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/withdraw
     newTag: latest
 
 # GHCR image owner templating.
 #
-# The base manifests reference images as ghcr.io/__GHCR_OWNER__/monolith-payment-gateway-grpc-quarkus/<svc>.
-# The `images` block above matches that placeholder (so newTag is pinned here),
-# and this `replacements` block substitutes the real owner (from the app-config
-# ConfigMap key GHCR_OWNER) into the <owner> segment of each image field.
-# GHCR_OWNER must match github.repository_owner (lowercase) of the repository
-# whose CI pushes to ghcr.io/<owner>/monolith-payment-gateway-grpc-quarkus/... —
-# on a fork, only this ConfigMap value needs to change.
+# Manifest menulis `ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/<svc>`.
+# Blok `images` di atas cocok dengan nama ber-placeholder itu (jadi newTag
+# dipin di sini), dan blok ini mengganti segmen owner dengan nilai nyata dari
+# app-config/GHCR_OWNER. GHCR_OWNER harus sama dengan github.repository_owner
+# (lowercase) repo yang CI-nya push ke ghcr.io/<owner>/microservice-payment-gateway-grpc/...
+# — di fork, cukup ubah nilai ConfigMap itu.
 replacements:
   - source:
       kind: ConfigMap
@@ -51,16 +77,35 @@ replacements:
     targets:
       - select:
           kind: Deployment
-          name: "^(gateway|auth|user|role|card|merchant|saldo|topup|transaction|transfer|withdraw|email-service)$"
+          name: "^(ai-security|apigateway|auth|card|email|merchant|role|saldo|stats-reader|stats-writer|topup|transaction|transfer|user|withdraw)$"
         fieldPaths:
           - spec.template.spec.containers.0.image
         options:
           delimiter: "/"
           index: 1
+
+components:
+  - ../../components/image-pull-secret
+
 patches:
+  # Urutan wave: PostgreSQL "-2" -> PgBouncer "-1" -> workload aplikasi "2".
+  # Tidak ada wave "0": pgw menjalankan migrasi goose saat startup service
+  # (bukan lewat Job migrate seperti repo saudara).
+  - path: postgres-wave.yaml
+    target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: "^(postgres-identity|postgres-payment|postgres-financial)$"
+  - path: pgbouncer-wave.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "^(pgbouncer-identity|pgbouncer-payment|pgbouncer-financial)$"
   - path: workload-wave.yaml
     target:
       group: apps
       version: v1
       kind: Deployment
-      name: "^(gateway|auth|user|role|card|merchant|saldo|topup|transaction|transfer|withdraw|email-service)$"
+      name: "^(ai-security|apigateway|auth|card|email|merchant|role|saldo|stats-reader|stats-writer|topup|transaction|transfer|user|withdraw)$"

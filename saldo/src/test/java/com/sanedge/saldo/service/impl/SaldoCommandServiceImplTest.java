@@ -39,13 +39,14 @@ import com.sanedge.saldo.repository.SaldoQueryRepository;
 
 import io.opentelemetry.api.common.Attributes;
 import io.smallrye.mutiny.Uni;
-import pb.card.CardQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Card;
 
 @ExtendWith(MockitoExtension.class)
 class SaldoCommandServiceImplTest {
 
     @Mock
-    private CardQueryService cardQueryService;
+    private CardPort cardPort;
     @Mock
     private SaldoCommandRepository saldoCommandRepo;
     @Mock
@@ -80,7 +81,7 @@ class SaldoCommandServiceImplTest {
         })
                 .when(tracingMetrics).traceAndMeasure(anyString(), anyString(), any());
 
-        service = new SaldoCommandServiceImpl(cardQueryService, saldoCommandRepo, saldoQueryRepo, redisService,
+        service = new SaldoCommandServiceImpl(cardPort, saldoCommandRepo, saldoQueryRepo, redisService,
                 tracingMetrics, outboxRepository);
         lenient().when(redisService.deleteReactive(anyString()))
                 .thenReturn(Uni.createFrom().voidItem());
@@ -141,10 +142,8 @@ class SaldoCommandServiceImplTest {
         @Test
         void success() {
             CreateSaldoRequest req = createReq();
-            pb.card.Card.ApiResponseCard cardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                    .setData(pb.card.Card.CardResponse.newBuilder().setCardNumber(req.getCardNumber()).build())
-                    .build();
-            when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(cardResp));
+            when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                    new Card(1, 100, req.getCardNumber(), null, null, null, null, null, null, null)));
             when(saldoCommandRepo.persist(any(Saldo.class))).thenAnswer(inv -> {
                 Saldo s = inv.getArgument(0);
                 s.setSaldoId(1L);
@@ -160,7 +159,7 @@ class SaldoCommandServiceImplTest {
         @Test
         void cardNotFound_returnsError() {
             CreateSaldoRequest req = createReq();
-            when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().nullItem());
+            when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().failure(new ResourceNotFoundException("Card not found")));
 
             ApiResponse<SaldoResponse> resp = service.create(req).await().indefinitely();
             assertThat(resp.status()).isEqualTo("error");
@@ -175,10 +174,8 @@ class SaldoCommandServiceImplTest {
         @Test
         void success() {
             UpdateSaldoRequest req = updateReq();
-            pb.card.Card.ApiResponseCard cardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                    .setData(pb.card.Card.CardResponse.newBuilder().setCardNumber(req.getCardNumber()).build())
-                    .build();
-            when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(cardResp));
+            when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                    new Card(1, 100, req.getCardNumber(), null, null, null, null, null, null, null)));
             when(saldoQueryRepo.findById(1L))
                     .thenReturn(Uni.createFrom().item(createSaldo(1L, req.getCardNumber(), 100000)));
             Saldo persisted = new Saldo();
@@ -197,10 +194,8 @@ class SaldoCommandServiceImplTest {
         @Test
         void notFound() {
             UpdateSaldoRequest req = updateReq();
-            pb.card.Card.ApiResponseCard cardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                    .setData(pb.card.Card.CardResponse.newBuilder().setCardNumber(req.getCardNumber()).build())
-                    .build();
-            when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(cardResp));
+            when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                    new Card(1, 100, req.getCardNumber(), null, null, null, null, null, null, null)));
             when(saldoQueryRepo.findById(1L)).thenReturn(Uni.createFrom().nullItem());
 
             ApiResponse<SaldoResponse> resp = service.update(req).await().indefinitely();

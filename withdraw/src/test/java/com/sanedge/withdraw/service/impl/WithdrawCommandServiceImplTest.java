@@ -42,9 +42,11 @@ import com.sanedge.withdraw.service.KafkaService;
 import io.opentelemetry.api.common.Attributes;
 import io.smallrye.mutiny.Uni;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Card;
+import com.sanedge.common.adapter.model.Saldo;
+import com.sanedge.common.adapter.model.SaldoMutationResult;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 
 @ExtendWith(MockitoExtension.class)
 class WithdrawCommandServiceImplTest {
@@ -59,13 +61,10 @@ class WithdrawCommandServiceImplTest {
         private WithdrawCommandRepository withdrawCommandRepo;
 
         @Mock
-        private CardQueryService cardQueryService;
+        private CardPort cardPort;
 
         @Mock
-        private SaldoQueryService saldoQueryService;
-
-        @Mock
-        private SaldoCommandService saldoCommandService;
+        private SaldoPort saldoPort;
 
         @Mock
         private Validator validator;
@@ -86,9 +85,8 @@ class WithdrawCommandServiceImplTest {
                 service = new WithdrawCommandServiceImpl(
                                 withdrawQueryRepository,
                                 withdrawCommandRepo,
-                                cardQueryService,
-                                saldoQueryService,
-                                saldoCommandService,
+                                cardPort,
+                                saldoPort,
                                 validator,
                                 redisService,
                                 kafkaService,
@@ -161,29 +159,20 @@ class WithdrawCommandServiceImplTest {
                 void create_Success() {
                         CreateWithdrawRequest req = createValidCreateRequest();
 
-                        // Mock card service
-                        pb.card.Card.CardWithEmailResponse cardWithEmailResp = pb.card.Card.CardWithEmailResponse
-                                        .newBuilder()
-                                        .setCardNumber("1234567890123456")
-                                        .setEmail("test@example.com")
-                                        .build();
-                        when(cardQueryService.findUserCardByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(cardWithEmailResp));
+                        // Mock card port
+                        when(cardPort.findUserCardByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Card(1, 100, "1234567890123456",
+                                                        null, null, null, null, "test@example.com", null, null)));
 
-                        // Mock saldo query service
-                        pb.saldo.Saldo.SaldoResponse saldoResp = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setCardNumber("1234567890123456")
-                                        .setTotalBalance(500000)
-                                        .build();
-                        pb.saldo.Saldo.ApiResponseSaldo apiSaldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                        .setData(saldoResp)
-                                        .build();
-                        when(saldoQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo port
+                        when(saldoPort.findByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Saldo(99, "1234567890123456",
+                                                        500000, null, null, null, null)));
 
-                        // Mock saldo command service
-                        when(saldoCommandService.updateSaldoWithdraw(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo command port
+                        when(saldoPort.updateSaldoWithdraw(any()))
+                                        .thenReturn(Uni.createFrom().item(new SaldoMutationResult(99,
+                                                        "1234567890123456", 350000)));
 
                         // Mock withdraw repo
                         when(withdrawCommandRepo.persist(any(Withdraw.class)))
@@ -233,12 +222,9 @@ class WithdrawCommandServiceImplTest {
                 void update_NotFound() {
                         UpdateWithdrawRequest req = createValidUpdateRequest();
 
-                        pb.card.Card.CardResponse cardResp = pb.card.Card.CardResponse.newBuilder()
-                                        .setCardNumber("1234567890123456").build();
-                        pb.card.Card.ApiResponseCard apiResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(cardResp).build();
-                        when(cardQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiResp));
+                        when(cardPort.findCardByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Card(1, 100, "1234567890123456",
+                                                        null, null, null, null, null, null, null)));
                         when(withdrawQueryRepository.findById(1L))
                                         .thenReturn(Uni.createFrom().nullItem());
 
@@ -254,12 +240,9 @@ class WithdrawCommandServiceImplTest {
 
                         Withdraw existingWithdraw = createTestWithdraw(1L, "1234567890123456", 150000L, Status.SUCCESS);
 
-                        pb.card.Card.CardResponse cardResp = pb.card.Card.CardResponse.newBuilder()
-                                        .setCardNumber("1234567890123456").build();
-                        pb.card.Card.ApiResponseCard apiResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(cardResp).build();
-                        when(cardQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiResp));
+                        when(cardPort.findCardByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Card(1, 100, "1234567890123456",
+                                                        null, null, null, null, null, null, null)));
                         when(withdrawQueryRepository.findById(1L))
                                         .thenReturn(Uni.createFrom().item(existingWithdraw));
 
@@ -275,12 +258,9 @@ class WithdrawCommandServiceImplTest {
 
                         Withdraw existingWithdraw = createTestWithdraw(1L, "1234567890123456", 150000L, Status.FAILED);
 
-                        pb.card.Card.CardResponse cardResp = pb.card.Card.CardResponse.newBuilder()
-                                        .setCardNumber("1234567890123456").build();
-                        pb.card.Card.ApiResponseCard apiResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(cardResp).build();
-                        when(cardQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiResp));
+                        when(cardPort.findCardByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Card(1, 100, "1234567890123456",
+                                                        null, null, null, null, null, null, null)));
                         when(withdrawQueryRepository.findById(1L))
                                         .thenReturn(Uni.createFrom().item(existingWithdraw));
 
@@ -296,31 +276,23 @@ class WithdrawCommandServiceImplTest {
 
                         Withdraw existingWithdraw = createTestWithdraw(1L, "1234567890123456", 150000L, Status.PENDING);
 
-                        // Mock card service
-                        pb.card.Card.CardResponse cardResp = pb.card.Card.CardResponse.newBuilder()
-                                        .setCardNumber("1234567890123456").build();
-                        pb.card.Card.ApiResponseCard apiCardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(cardResp).build();
-                        when(cardQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiCardResp));
+                        // Mock card port
+                        when(cardPort.findCardByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Card(1, 100, "1234567890123456",
+                                                        null, null, null, null, null, null, null)));
 
                         when(withdrawQueryRepository.findById(1L))
                                         .thenReturn(Uni.createFrom().item(existingWithdraw));
 
-                        // Mock saldo query service
-                        pb.saldo.Saldo.SaldoResponse saldoResp = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setCardNumber("1234567890123456")
-                                        .setTotalBalance(500000)
-                                        .build();
-                        pb.saldo.Saldo.ApiResponseSaldo apiSaldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                        .setData(saldoResp)
-                                        .build();
-                        when(saldoQueryService.findByCardNumber(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo port
+                        when(saldoPort.findByCardNumber(any()))
+                                        .thenReturn(Uni.createFrom().item(new Saldo(99, "1234567890123456",
+                                                        500000, null, null, null, null)));
 
-                        // Mock saldo command service
-                        when(saldoCommandService.updateSaldoWithdraw(any()))
-                                        .thenReturn(Uni.createFrom().item(apiSaldoResp));
+                        // Mock saldo command port
+                        when(saldoPort.updateSaldoWithdraw(any()))
+                                        .thenReturn(Uni.createFrom().item(new SaldoMutationResult(99,
+                                                        "1234567890123456", 450000)));
 
                         when(withdrawCommandRepo.persist(any(Withdraw.class)))
                                         .thenAnswer(inv -> {

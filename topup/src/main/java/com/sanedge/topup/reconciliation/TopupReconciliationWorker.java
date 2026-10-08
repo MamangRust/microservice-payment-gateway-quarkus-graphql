@@ -8,19 +8,18 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.topup.entity.Topup;
 import com.sanedge.topup.repository.TopupCommandRepository;
 import com.sanedge.topup.repository.TopupQueryRepository;
 
 import io.quarkus.arc.Unremovable;
-import io.quarkus.grpc.GrpcClient;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import pb.saldo.SaldoCommandService;
 
 /**
  * Durable reconciliation worker for topups. Claims compensation records with an
@@ -46,8 +45,7 @@ public class TopupReconciliationWorker {
     TopupCommandRepository topupCommandRepository;
 
     @Inject
-    @GrpcClient("saldo")
-    SaldoCommandService saldoCommandService;
+    SaldoPort saldoPort;
 
     @ConfigProperty(name = "topup.reconciliation.enabled", defaultValue = "true")
     boolean enabled;
@@ -124,22 +122,11 @@ public class TopupReconciliationWorker {
                                 .map(v -> (Void) null);
                     }
                     int reverseDelta = -delta;
-                    return saldoCommandService.updateSaldoBalance(
-                            pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest.newBuilder()
-                                    .setCardNumber(card)
-                                    .setTotalBalance(0)
-                                    .setDeltaBalance(reverseDelta)
-                                    .setMinimumBalance(0)
-                                    .setOperationKey("topup-comp:" + id)
-                                    .build())
-                            .chain(resp -> {
-                                if (resp == null || !"success".equalsIgnoreCase(resp.getStatus())) {
-                                    return failAndRelease(id, claimToken,
-                                            resp == null ? "saldo service unavailable" : resp.getMessage());
-                                }
-                                return topupCommandRepository.completeCompensation(id, WORKER_ID, claimToken)
-                                        .map(v -> (Void) null);
-                            })
+                    return saldoPort.updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                            card, 0, reverseDelta, 0, null, null, "topup-comp:" + id))
+                            .chain(resp -> topupCommandRepository
+                                    .completeCompensation(id, WORKER_ID, claimToken)
+                                    .map(v -> (Void) null))
                             .onFailure().recoverWithUni(err -> failAndRelease(id, claimToken,
                                     "compensation adapter failed: " + err.getMessage()));
                 });

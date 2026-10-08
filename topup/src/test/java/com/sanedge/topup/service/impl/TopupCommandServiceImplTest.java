@@ -48,19 +48,19 @@ import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Path;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Card;
+import com.sanedge.common.adapter.model.Saldo;
+import com.sanedge.common.adapter.model.SaldoMutationResult;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 
 @ExtendWith(MockitoExtension.class)
 class TopupCommandServiceImplTest {
 
         @Mock
-        private CardQueryService cardQueryService;
+        private CardPort cardPort;
         @Mock
-        private SaldoQueryService saldoQueryService;
-        @Mock
-        private SaldoCommandService saldoCommandService;
+        private SaldoPort saldoPort;
         @Mock
         private TopupQueryRepository topupQueryRepo;
         @Mock
@@ -94,9 +94,8 @@ class TopupCommandServiceImplTest {
                         return s.get();
                 }).when(tracingMetrics).traceAndMeasure(anyString(), anyString(), any());
 
-                service = new TopupCommandServiceImpl(cardQueryService, saldoQueryService, saldoCommandService,
-                                topupQueryRepo, topupCommandRepo, validator, redisService, kafkaService,
-                                tracingMetrics, outboxRepository);
+                service = new TopupCommandServiceImpl(cardPort, saldoPort, topupQueryRepo, topupCommandRepo,
+                                validator, redisService, kafkaService, tracingMetrics, outboxRepository);
                 lenient().when(redisService.deleteReactive(anyString()))
                 .thenReturn(Uni.createFrom().voidItem());
                 lenient().when(outboxRepository.persist(any(Outbox.class)))
@@ -137,17 +136,15 @@ class TopupCommandServiceImplTest {
         }
 
         private void mockCardAndSaldoForCreate() {
-                pb.card.Card.CardWithEmailResponse cardResp = pb.card.Card.CardWithEmailResponse.newBuilder()
-                                .setCardNumber("1234-5678-9012-3456").setEmail("test@test.com").build();
-                lenient().when(cardQueryService.findUserCardByCardNumber(any()))
-                                .thenReturn(Uni.createFrom().item(cardResp));
-                pb.saldo.Saldo.SaldoResponse saldo = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                .setCardNumber("1234-5678-9012-3456").setTotalBalance(100000).build();
-                pb.saldo.Saldo.ApiResponseSaldo saldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder().setData(saldo)
-                                .build();
-                lenient().when(saldoQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(saldoResp));
-                lenient().when(saldoCommandService.updateSaldoBalance(any()))
-                                .thenReturn(Uni.createFrom().item(saldoResp));
+                lenient().when(cardPort.findUserCardByCardNumber(any()))
+                                .thenReturn(Uni.createFrom().item(new Card(1, 1, "1234-5678-9012-3456",
+                                                null, null, null, null, "test@test.com", null, null)));
+                lenient().when(saldoPort.findByCardNumber(any()))
+                                .thenReturn(Uni.createFrom().item(new Saldo(99, "1234-5678-9012-3456",
+                                                100000, null, null, null, null)));
+                lenient().when(saldoPort.updateSaldoBalance(any()))
+                                .thenReturn(Uni.createFrom().item(new SaldoMutationResult(99,
+                                                "1234-5678-9012-3456", 150000)));
                 lenient().when(kafkaService.sendMessage(anyString(), anyString(), any()))
                                 .thenReturn(Uni.createFrom().voidItem());
         }
@@ -196,25 +193,15 @@ class TopupCommandServiceImplTest {
                         when(topupQueryRepo.findTopupById(1L)).thenReturn(Uni.createFrom().item(existing));
 
                         // Card response
-                        pb.card.Card.ApiResponseCard cardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(pb.card.Card.CardResponse.newBuilder()
-                                                        .setCardNumber("1234-5678-9012-3456").build())
-                                        .build();
-                        when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(cardResp));
+                        when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                                new Card(1, 1, "1234-5678-9012-3456", null, null, null, null, null, null, null)));
 
                         // Saldo response with explicit saldoId
-                        pb.saldo.Saldo.SaldoResponse saldo = pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setCardNumber("1234-5678-9012-3456")
-                                        .setTotalBalance(100000)
-                                        .setSaldoId(99) // important
-                                        .build();
-                        pb.saldo.Saldo.ApiResponseSaldo saldoResp = pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                        .setData(saldo)
-                                        .build();
-                        when(saldoQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(saldoResp));
+                        when(saldoPort.findByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                                new Saldo(99, "1234-5678-9012-3456", 100000, null, null, null, null)));
 
-                        when(saldoCommandService.updateSaldoBalance(any()))
-                                        .thenReturn(Uni.createFrom().item(saldoResp));
+                        when(saldoPort.updateSaldoBalance(any())).thenReturn(Uni.createFrom().item(
+                                new SaldoMutationResult(99, "1234-5678-9012-3456", 175000)));
 
                         // Use a fixed Topup response to avoid generic type inference issues
                         Topup persisted = new Topup();
@@ -245,11 +232,8 @@ class TopupCommandServiceImplTest {
                 void notFound() {
                         UpdateTopupRequest req = createValidUpdateRequest();
 
-                        pb.card.Card.ApiResponseCard cardResp = pb.card.Card.ApiResponseCard.newBuilder()
-                                        .setData(pb.card.Card.CardResponse.newBuilder()
-                                                        .setCardNumber("1234-5678-9012-3456").build())
-                                        .build();
-                        when(cardQueryService.findByCardNumber(any())).thenReturn(Uni.createFrom().item(cardResp));
+                        when(cardPort.findCardByCardNumber(any())).thenReturn(Uni.createFrom().item(
+                                new Card(1, 1, "1234-5678-9012-3456", null, null, null, null, null, null, null)));
 
                         when(topupQueryRepo.findTopupById(1L)).thenReturn(Uni.createFrom().nullItem());
                         when(topupCommandRepo.updateTopupStatus(anyLong(), anyString()))

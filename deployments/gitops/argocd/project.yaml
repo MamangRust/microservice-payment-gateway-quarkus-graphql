@@ -6,7 +6,7 @@ metadata:
   finalizers:
   - resources-finalizer.argocd.argoproj.io
 spec:
-  description: Payment gateway Quarkus microservices project
+  description: Payment Gateway modular microservice project
   sourceRepos:
   - '*'
   destinations:

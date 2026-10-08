@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Kafka mode KRaft (tanpa Zookeeper).
+resources:
+  - kafka-deployment.yaml # StatefulSet kafka
+  - kafka-service.yaml # Service kafka (juga governing service StatefulSet)
+  - kafka-create-topic-email-job.yaml # Job kafka-create-email-topics

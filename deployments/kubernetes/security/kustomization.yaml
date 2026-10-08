@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Baseline keamanan level namespace. Policy NetworkPolicy bersifat aditif
+# (union), jadi urutan di sini tidak penting.
+resources:
+  - default-deny.yaml # NetworkPolicy default-deny-all (tolak semua)
+  - dns-egress.yaml # NetworkPolicy allow-dns-egress (CoreDNS :53)
+  - allow-intra-namespace.yaml # NetworkPolicy allow-intra-namespace
+  - external-ingress.yaml # NetworkPolicy allow-external-ui-ingress (Service LoadBalancer)
+  - email-smtp-egress.yaml # NetworkPolicy allow-email-smtp-egress (:587)

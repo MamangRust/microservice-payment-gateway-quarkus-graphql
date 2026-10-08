@@ -33,7 +33,8 @@ import com.sanedge.user.repository.UserRepository;
 
 import io.opentelemetry.api.common.Attributes;
 import io.smallrye.mutiny.Uni;
-import pb.role.RoleService;
+import com.sanedge.common.adapter.model.Role;
+import com.sanedge.common.adapter.role.RolePort;
 
 @ExtendWith(MockitoExtension.class)
 class UserCommandServiceImplTest {
@@ -51,7 +52,7 @@ class UserCommandServiceImplTest {
     private TracingMetrics tracingMetrics;
 
     @Mock
-    private RoleService roleService;
+    private RolePort rolePort;
 
     private UserCommandServiceImpl userCommandService;
 
@@ -64,9 +65,9 @@ class UserCommandServiceImplTest {
                 tracingMetrics);
 
         try {
-            java.lang.reflect.Field roleQueryField = UserCommandServiceImpl.class.getDeclaredField("roleQueryService");
+            java.lang.reflect.Field roleQueryField = UserCommandServiceImpl.class.getDeclaredField("rolePort");
             roleQueryField.setAccessible(true);
-            roleQueryField.set(userCommandService, roleService);
+            roleQueryField.set(userCommandService, rolePort);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -151,19 +152,7 @@ class UserCommandServiceImplTest {
         request.setFirstname("John");
         request.setLastname("Doe");
 
-        pb.role.RoleQuery.FindByNameRoleRequest requestProto = pb.role.RoleQuery.FindByNameRoleRequest.newBuilder()
-                .setName("ROLE_USER")
-                .build();
-        pb.role.Role.ApiResponseRole responseProto = pb.role.Role.ApiResponseRole.newBuilder()
-                .setStatus("success")
-                .setMessage("Role found")
-                .setData(pb.role.Role.RoleResponse.newBuilder()
-                        .setId(1)
-                        .setName("ROLE_USER")
-                        .build())
-                .build();
-
-        lenient().when(roleService.findByNameRole(requestProto)).thenReturn(Uni.createFrom().item(responseProto));
+        lenient().when(rolePort.findByName(anyString())).thenReturn(Uni.createFrom().item(new Role(1, "ROLE_USER", null, null)));
 
         lenient().when(userRepository.persist(any(User.class))).thenAnswer(invocation -> {
             User userToPersist = invocation.getArgument(0);

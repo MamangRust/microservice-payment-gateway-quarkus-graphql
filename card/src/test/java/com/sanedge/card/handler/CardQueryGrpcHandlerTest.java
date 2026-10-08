@@ -2,6 +2,7 @@ package com.sanedge.card.handler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -27,8 +28,8 @@ import io.grpc.StatusRuntimeException;
 import io.smallrye.mutiny.Uni;
 import pb.card.Card;
 import pb.card.CardQuery;
-import pb.user.User;
-import pb.user.UserQueryService;
+import com.sanedge.common.adapter.model.User;
+import com.sanedge.common.adapter.user.UserPort;
 
 @ExtendWith({ MockitoExtension.class, PanacheSessionPassthrough.class })
 class CardQueryGrpcHandlerTest {
@@ -37,7 +38,7 @@ class CardQueryGrpcHandlerTest {
     private CardQueryService cardQueryService;
 
     @Mock
-    private UserQueryService userQueryService;
+    private UserPort userPort;
 
     private CardQueryGrpcHandler handler;
 
@@ -45,7 +46,7 @@ class CardQueryGrpcHandlerTest {
     void setUp() {
         handler = new CardQueryGrpcHandler();
         handler.cardQueryService = cardQueryService;
-        handler.userQueryService = userQueryService;
+        handler.userPort = userPort;
     }
 
     // helpers
@@ -202,10 +203,8 @@ class CardQueryGrpcHandlerTest {
         ApiResponse<CardResponse> apiResp = ApiResponse.success("Card found", data);
         when(cardQueryService.findByCardNumber(anyString())).thenReturn(Uni.createFrom().item(apiResp));
 
-        User.ApiResponseUser userResp = User.ApiResponseUser.newBuilder()
-                .setData(User.UserResponse.newBuilder().setEmail("user@test.com").build())
-                .build();
-        when(userQueryService.findById(any())).thenReturn(Uni.createFrom().item(userResp));
+        when(userPort.findById(anyInt()))
+                .thenReturn(Uni.createFrom().item(new User(100, null, null, "user@test.com", null, null)));
 
         Card.CardWithEmailResponse response = handler.findUserCardByCardNumber(request).await().indefinitely();
         assertThat(response.getEmail()).isEqualTo("user@test.com");

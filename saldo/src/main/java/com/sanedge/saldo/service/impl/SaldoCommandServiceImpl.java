@@ -3,6 +3,7 @@ package com.sanedge.saldo.service.impl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sanedge.common.adapter.card.CardPort;
 import com.sanedge.common.config.RedisService;
 import com.sanedge.common.observability.TracingMetrics;
 import com.sanedge.saldo.domain.requests.CreateSaldoRequest;
@@ -15,8 +16,6 @@ import com.sanedge.saldo.entity.Saldo;
 import com.sanedge.saldo.repository.OutboxRepository;
 import com.sanedge.common.exception.InvalidRequestException;
 import com.sanedge.common.exception.ResourceNotFoundException;
-import pb.card.CardQueryService;
-import io.quarkus.grpc.GrpcClient;
 import com.sanedge.saldo.repository.SaldoCommandRepository;
 import com.sanedge.saldo.repository.SaldoQueryRepository;
 import com.sanedge.saldo.service.SaldoCommandService;
@@ -32,7 +31,7 @@ import jakarta.inject.Inject;
 public class SaldoCommandServiceImpl implements SaldoCommandService {
     private static final Logger logger = LoggerFactory.getLogger(SaldoCommandServiceImpl.class);
 
-    private final CardQueryService cardQueryService;
+    private final CardPort cardPort;
     private final SaldoCommandRepository saldoCommandRepository;
     private final SaldoQueryRepository saldoQueryRepository;
     private final RedisService redisService;
@@ -40,13 +39,13 @@ public class SaldoCommandServiceImpl implements SaldoCommandService {
     private final OutboxRepository outboxRepository;
 
     @Inject
-    public SaldoCommandServiceImpl(@GrpcClient("card") CardQueryService cardQueryService,
+    public SaldoCommandServiceImpl(CardPort cardPort,
             SaldoCommandRepository saldoCommandRepository,
             SaldoQueryRepository saldoQueryRepository,
             RedisService redisService,
             TracingMetrics tracingMetrics,
             OutboxRepository outboxRepository) {
-        this.cardQueryService = cardQueryService;
+        this.cardPort = cardPort;
         this.saldoCommandRepository = saldoCommandRepository;
         this.saldoQueryRepository = saldoQueryRepository;
         this.redisService = redisService;
@@ -81,15 +80,9 @@ public class SaldoCommandServiceImpl implements SaldoCommandService {
         logger.info("Creating saldo for card_number={}", request.getCardNumber());
 
         return tracingMetrics.traceAndMeasure("createSaldo", "create_saldo", attrs, () -> {
-            return cardQueryService
-                    .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                            .setCardNumber(request.getCardNumber()).build())
-                    .chain(cardResponse -> {
-                        if (cardResponse == null || !cardResponse.hasData()) {
-                            logger.error("Card {} not found", request.getCardNumber());
-                            throw new ResourceNotFoundException("Card not found");
-                        }
-
+            return cardPort
+                    .findCardByCardNumber(request.getCardNumber())
+                    .chain(card -> {
                         // Kafka saldo-create is at-least-once. Re-delivery must replay the
                         // existing saldo instead of inserting a second row for the card.
                         return saldoCommandRepository.lockCardForCreate(request.getCardNumber())
@@ -143,16 +136,9 @@ public class SaldoCommandServiceImpl implements SaldoCommandService {
         logger.info("Updating saldo id={} for card={}", request.getSaldoId(), request.getCardNumber());
 
         return tracingMetrics.traceAndMeasure("updateSaldo", "update_saldo", attrs, () -> {
-            return cardQueryService
-                    .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                            .setCardNumber(request.getCardNumber()).build())
-                    .chain(cardResponse -> {
-                        if (cardResponse == null || !cardResponse.hasData()) {
-                            logger.error("Card {} not found during update", request.getCardNumber());
-                            throw new ResourceNotFoundException("Card not found");
-                        }
-                        return saldoQueryRepository.findById(request.getSaldoId());
-                    })
+            return cardPort
+                    .findCardByCardNumber(request.getCardNumber())
+                    .chain(card -> saldoQueryRepository.findById(request.getSaldoId()))
                     .chain(saldo -> {
                         if (saldo == null) {
                             logger.error("Saldo not found with id {}", request.getSaldoId());

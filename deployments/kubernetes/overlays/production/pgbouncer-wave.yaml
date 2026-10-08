@@ -1,0 +1,8 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placeholder
+  annotations:
+    # PgBouncer menunggu PostgreSQL siap, dan seluruh beban kerja aplikasi
+    # menunggu PgBouncer. Satu wave lebih awal dari service (wave 2).
+    argocd.argoproj.io/sync-wave: "-1"

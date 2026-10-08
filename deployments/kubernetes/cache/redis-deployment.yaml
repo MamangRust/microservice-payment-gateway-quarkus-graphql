@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: payment-gateway
+spec:
+  serviceName: "redis"
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      containers:
+      - name: redis
+        image: redis:7.4-alpine
+        command: ["redis-server"]
+        args: [
+          "--port", "6379",
+          "--cluster-enabled", "yes",
+          "--cluster-config-file", "nodes.conf",
+          "--cluster-node-timeout", "5000",
+          "--appendonly", "yes",
+          "--requirepass", "dragon_knight",
+          "--masterauth", "dragon_knight",
+          "--bind", "0.0.0.0"
+        ]
+        ports:
+        - containerPort: 6379
+          name: redis
+        - containerPort: 16379
+          name: cluster
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 5Gi

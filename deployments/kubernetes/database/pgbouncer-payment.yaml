@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer-payment
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgbouncer-payment
+  template:
+    metadata:
+      labels:
+        app: pgbouncer-payment
+        tier: pgbouncer
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      containers:
+        - name: pgbouncer
+          image: edoburu/pgbouncer:latest
+          ports:
+            - name: pgbouncer
+              containerPort: 5432
+          env:
+            - name: DB_HOST
+              value: postgres-payment.payment-gateway.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: postgres
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              value: pg_payment
+            - name: AUTH_TYPE
+              value: scram-sha-256
+            - name: POOL_MODE
+              value: session
+            - name: MAX_CLIENT_CONN
+              value: "1000"
+            - name: DEFAULT_POOL_SIZE
+              value: "20"
+            - name: MAX_PREPARED_STATEMENTS
+              value: "100"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "pg_payment"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer-payment
+  namespace: payment-gateway
+spec:
+  selector:
+    app: pgbouncer-payment
+  ports:
+    - name: pgbouncer
+      port: 5432
+      targetPort: 5432

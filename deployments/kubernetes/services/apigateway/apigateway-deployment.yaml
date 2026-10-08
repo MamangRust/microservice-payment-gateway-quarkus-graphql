@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apigateway
+  namespace: payment-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: apigateway
+  template:
+    metadata:
+      labels:
+        app: apigateway
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.35
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "[INIT] Waiting for Kafka to be ready (TCP)..."
+              until nc -z kafka.payment-gateway.svc.cluster.local 9092; do
+                echo "Kafka is not ready yet. Retrying in 5 seconds..."
+                sleep 5
+              done
+              echo "[INIT] Kafka is ready!"
+        - name: wait-for-redis-cluster
+          image: busybox:1.35
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "[INIT] Waiting for Redis Cluster nodes to be ready..."
+              until nc -z redis-0.redis.payment-gateway.svc.cluster.local 6379; do
+                echo "Redis Cluster node 0 is not ready yet. Retrying in 5 seconds..."
+                sleep 5
+              done
+              echo "[INIT] Redis Cluster is accessible!"
+      containers:
+        - name: apigateway
+          image: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/apigateway:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          ports:
+            - containerPort: 5000
+            - containerPort: 8091
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"

@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sanedge.common.adapter.role.RolePort;
 import com.sanedge.common.config.RedisService;
 import com.sanedge.common.observability.TracingMetrics;
 import com.sanedge.common.domain.response.ApiResponse;
@@ -26,7 +27,6 @@ import com.sanedge.user.repository.UserRepository;
 import com.sanedge.user.service.UserCommandService;
 
 import io.opentelemetry.api.common.Attributes;
-import io.quarkus.grpc.GrpcClient;
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -42,8 +42,8 @@ public class UserCommandServiceImpl implements UserCommandService {
         private final RedisService redisService;
         private final TracingMetrics tracingMetrics;
 
-        @GrpcClient("role")
-        pb.role.RoleService roleQueryService;
+        @Inject
+        RolePort rolePort;
 
         @Inject
         public UserCommandServiceImpl(UserRepository userRepository,
@@ -436,19 +436,12 @@ public class UserCommandServiceImpl implements UserCommandService {
         }
 
         private Uni<Role> resolveRoleViaGrpc(String roleName) {
-                return roleQueryService.findByNameRole(pb.role.RoleQuery.FindByNameRoleRequest.newBuilder()
-                                .setName(roleName)
-                                .build())
-                                .chain(response -> {
-                                        if (!response.hasData()) {
-                                                return Uni.createFrom().failure(new ResourceNotFoundException(
-                                                                "Role '" + roleName + "' not found in Role service"));
-                                        }
-                                        pb.role.Role.RoleResponse matchedRole = response.getData();
+                return rolePort.findByName(roleName)
+                                .map(matchedRole -> {
                                         Role role = new Role();
-                                        role.id = (long) matchedRole.getId();
-                                        role.setRoleName(matchedRole.getName());
-                                        return Uni.createFrom().item(role);
+                                        role.id = (long) matchedRole.id();
+                                        role.setRoleName(matchedRole.name());
+                                        return role;
                                 });
         }
 }

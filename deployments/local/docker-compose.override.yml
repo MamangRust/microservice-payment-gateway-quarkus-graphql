@@ -1,0 +1,55 @@
+services:
+  pyroscope:
+    profiles:
+      - monitoring
+
+  # Minimal e2e: single redis + single kafka
+  # Redis/Kafka env come from docker.env (single source of truth for viper config-file precedence).
+  # Only KAFKA_BROKERS is overridden here to single-broker for local minimal e2e.
+  apigateway:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  auth:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  card:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  merchant:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  user:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  role:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  saldo:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  topup:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  transaction:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  transfer:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  withdraw:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+
+  email:
+    environment:
+      KAFKA_BROKERS: kafka-1:9092

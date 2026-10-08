@@ -23,6 +23,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.merchant.MerchantPort;
+import com.sanedge.common.adapter.model.Card;
+import com.sanedge.common.adapter.model.Merchant;
+import com.sanedge.common.adapter.model.Saldo;
+import com.sanedge.common.adapter.model.SaldoMutationResult;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.common.config.RedisService;
 import com.sanedge.common.domain.response.ApiResponse;
 import com.sanedge.common.enums.Status;
@@ -38,18 +45,9 @@ import com.sanedge.transaction.repository.TransactionCommandRepository;
 import com.sanedge.transaction.repository.TransactionQueryRepository;
 import com.sanedge.transaction.service.KafkaService;
 
-import io.grpc.StatusRuntimeException;
-
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.JsonObject;
 import jakarta.validation.Validator;
-import pb.card.Card;
-import pb.card.CardQueryService;
-import pb.merchant.Merchant;
-import pb.merchant.MerchantQueryService;
-import pb.saldo.Saldo;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
 
 /**
  * Unit tests for {@link TransactionCommandServiceImpl}.
@@ -61,16 +59,13 @@ import pb.saldo.SaldoQueryService;
 class TransactionCommandServiceImplTest {
 
     @Mock
-    CardQueryService cardQueryService;
+    CardPort cardPort;
 
     @Mock
-    MerchantQueryService merchantQueryService;
+    MerchantPort merchantPort;
 
     @Mock
-    SaldoQueryService saldoQueryService;
-
-    @Mock
-    SaldoCommandService saldoCommandService;
+    SaldoPort saldoPort;
 
     @Mock
     TransactionQueryRepository transactionQueryRepository;
@@ -97,6 +92,22 @@ class TransactionCommandServiceImplTest {
     TransactionCommandServiceImpl transactionCommandService;
 
     private Transaction transaction;
+
+    private static Merchant merchant(int id, int userId) {
+        return new Merchant(id, "Merchant " + id, "api-key-1", "ACTIVE", userId, null, null);
+    }
+
+    private static Card card(String cardNumber, String email) {
+        return new Card(1, 1, cardNumber, "CREDIT", "12/30", "123", "VISA", email, null, null);
+    }
+
+    private static Saldo saldo(String cardNumber, int totalBalance) {
+        return new Saldo(1, cardNumber, totalBalance, null, null, null, null);
+    }
+
+    private static SaldoMutationResult mutation(String cardNumber, int totalBalance) {
+        return new SaldoMutationResult(1, cardNumber, totalBalance);
+    }
 
     @BeforeEach
     void setUp() {
@@ -141,41 +152,17 @@ class TransactionCommandServiceImplTest {
 
     @Test
     void createTransaction_success() {
-        Merchant.MerchantResponse merchantResponse = Merchant.MerchantResponse.newBuilder()
-                .setId(1)
-                .setUserId(1)
-                .build();
-        Merchant.ApiResponseMerchant merchantApiResponse = Merchant.ApiResponseMerchant.newBuilder()
-                .setStatus("success")
-                .setData(merchantResponse)
-                .build();
-        when(merchantQueryService.findByApiKey(any()))
-                .thenReturn(Uni.createFrom().item(merchantApiResponse));
+        when(merchantPort.findByApiKey(any()))
+                .thenReturn(Uni.createFrom().item(merchant(1, 1)));
 
-        Card.CardWithEmailResponse cardWithEmail = Card.CardWithEmailResponse.newBuilder()
-                .setCardNumber("4111111111111111")
-                .setEmail("test@example.com")
-                .build();
-        when(cardQueryService.findUserCardByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(cardWithEmail));
+        when(cardPort.findUserCardByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(card("4111111111111111", "test@example.com")));
 
-        Saldo.SaldoResponse saldoResponse = Saldo.SaldoResponse.newBuilder()
-                .setSaldoId(1)
-                .setCardNumber("4111111111111111")
-                .setTotalBalance(500000)
-                .build();
-        Saldo.ApiResponseSaldo apiSaldo = Saldo.ApiResponseSaldo.newBuilder()
-                .setStatus("success")
-                .setData(saldoResponse)
-                .build();
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(apiSaldo));
+        when(saldoPort.findByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(saldo("4111111111111111", 500000)));
 
-        Saldo.ApiResponseSaldo updateSaldoResp = Saldo.ApiResponseSaldo.newBuilder()
-                .setStatus("success")
-                .build();
-        when(saldoCommandService.updateSaldoBalance(any()))
-                .thenReturn(Uni.createFrom().item(updateSaldoResp));
+        when(saldoPort.updateSaldoBalance(any()))
+                .thenReturn(Uni.createFrom().item(mutation("4111111111111111", 350000)));
 
         when(transactionCommandRepository.persist(any(com.sanedge.transaction.entity.Transaction.class)))
                 .thenAnswer(inv -> {
@@ -191,15 +178,8 @@ class TransactionCommandServiceImplTest {
                     return Uni.createFrom().item(transaction);
                 });
 
-        Card.CardResponse merchantCard = Card.CardResponse.newBuilder()
-                .setCardNumber("2222222222222222")
-                .build();
-        Card.ApiResponseCard merchantCardApiResp = Card.ApiResponseCard.newBuilder()
-                .setStatus("success")
-                .setData(merchantCard)
-                .build();
-        when(cardQueryService.findByUserIdCard(any()))
-                .thenReturn(Uni.createFrom().item(merchantCardApiResp));
+        when(cardPort.findCardByUserId(any(Integer.class)))
+                .thenReturn(Uni.createFrom().item(card("2222222222222222", null)));
 
         when(kafkaService.sendMessage(anyString(), anyString(), any(JsonObject.class)))
                 .thenReturn(Uni.createFrom().voidItem());
@@ -236,44 +216,17 @@ class TransactionCommandServiceImplTest {
         when(transactionQueryRepository.findTransactionById(1L))
                 .thenReturn(Uni.createFrom().item(existing));
 
-        Merchant.MerchantResponse merchantResponse = Merchant.MerchantResponse.newBuilder()
-                .setId(1)
-                .setUserId(1)
-                .build();
-        Merchant.ApiResponseMerchant merchantApiResponse = Merchant.ApiResponseMerchant.newBuilder()
-                .setStatus("success")
-                .setData(merchantResponse)
-                .build();
-        when(merchantQueryService.findByApiKey(any()))
-                .thenReturn(Uni.createFrom().item(merchantApiResponse));
+        when(merchantPort.findByApiKey(any()))
+                .thenReturn(Uni.createFrom().item(merchant(1, 1)));
 
-        Card.CardResponse cardResponseData = Card.CardResponse.newBuilder()
-                .setCardNumber("4111111111111111")
-                .build();
-        Card.ApiResponseCard cardApiResponse = Card.ApiResponseCard.newBuilder()
-                .setStatus("success")
-                .setData(cardResponseData)
-                .build();
-        when(cardQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(cardApiResponse));
+        when(cardPort.findCardByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(card("4111111111111111", null)));
 
-        Saldo.SaldoResponse saldoResponse = Saldo.SaldoResponse.newBuilder()
-                .setSaldoId(1)
-                .setCardNumber("4111111111111111")
-                .setTotalBalance(500000)
-                .build();
-        Saldo.ApiResponseSaldo apiSaldo = Saldo.ApiResponseSaldo.newBuilder()
-                .setStatus("success")
-                .setData(saldoResponse)
-                .build();
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(apiSaldo));
+        when(saldoPort.findByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(saldo("4111111111111111", 500000)));
 
-        Saldo.ApiResponseSaldo updateSaldoResp = Saldo.ApiResponseSaldo.newBuilder()
-                .setStatus("success")
-                .build();
-        when(saldoCommandService.updateSaldoBalance(any()))
-                .thenReturn(Uni.createFrom().item(updateSaldoResp));
+        when(saldoPort.updateSaldoBalance(any()))
+                .thenReturn(Uni.createFrom().item(mutation("4111111111111111", 400000)));
 
         when(transactionCommandRepository.persist(any(com.sanedge.transaction.entity.Transaction.class)))
                 .thenAnswer(inv -> {
@@ -408,7 +361,7 @@ class TransactionCommandServiceImplTest {
                     .as("error message must mention validation, got: %s", result.message());
 
             // No remote call should have been made
-            verify(merchantQueryService, never()).findByApiKey(any());
+            verify(merchantPort, never()).findByApiKey(any());
         }
     }
 
@@ -426,27 +379,16 @@ class TransactionCommandServiceImplTest {
         when(validator.validate(any())).thenReturn(Set.of());
 
         // Merchant exists
-        pb.merchant.Merchant.MerchantResponse merchantResp =
-                pb.merchant.Merchant.MerchantResponse.newBuilder()
-                        .setId(1).setUserId(1).setApiKey("api-key-1").build();
-        when(merchantQueryService.findByApiKey(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.merchant.Merchant.ApiResponseMerchant.newBuilder()
-                                .setData(merchantResp).setStatus("success").build()));
+        when(merchantPort.findByApiKey(any()))
+                .thenReturn(Uni.createFrom().item(merchant(1, 1)));
 
         // Card exists
-        when(cardQueryService.findUserCardByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.card.Card.CardWithEmailResponse.newBuilder()
-                                .setCardNumber("4111111111111111").build()));
+        when(cardPort.findUserCardByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(card("4111111111111111", null)));
 
         // Saldo exists but balance is small
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setTotalBalance(5000).build())
-                                .setStatus("success").build()));
+        when(saldoPort.findByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(saldo("4111111111111111", 5000)));
 
         ApiResponse<TransactionResponse> result =
                 transactionCommandService.create("api-key-1", req)
@@ -458,7 +400,7 @@ class TransactionCommandServiceImplTest {
                 .as("error should mention balance: %s", result.message());
 
         // Saldo debit must NOT have been called
-        verify(saldoCommandService, never()).updateSaldoBalance(any());
+        verify(saldoPort, never()).updateSaldoBalance(any());
     }
 
     // F3: Debit failure — saldo gRPC call fails mid-transaction.
@@ -474,28 +416,17 @@ class TransactionCommandServiceImplTest {
 
         when(validator.validate(any())).thenReturn(Set.of());
 
-        pb.merchant.Merchant.MerchantResponse merchantResp =
-                pb.merchant.Merchant.MerchantResponse.newBuilder()
-                        .setId(1).setUserId(1).setApiKey("api-key-1").build();
-        when(merchantQueryService.findByApiKey(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.merchant.Merchant.ApiResponseMerchant.newBuilder()
-                                .setData(merchantResp).setStatus("success").build()));
+        when(merchantPort.findByApiKey(any()))
+                .thenReturn(Uni.createFrom().item(merchant(1, 1)));
 
-        when(cardQueryService.findUserCardByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.card.Card.CardWithEmailResponse.newBuilder()
-                                .setCardNumber("4111111111111111").build()));
+        when(cardPort.findUserCardByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(card("4111111111111111", null)));
 
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setTotalBalance(100_000).build())
-                                .setStatus("success").build()));
+        when(saldoPort.findByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(saldo("4111111111111111", 100_000)));
 
         // DEBIT FAILS: saldo service unavailable
-        when(saldoCommandService.updateSaldoBalance(any()))
+        when(saldoPort.updateSaldoBalance(any()))
                 .thenReturn(Uni.createFrom().failure(
                         new io.grpc.StatusRuntimeException(
                                 io.grpc.Status.UNAVAILABLE.withDescription("saldo service down"))));
@@ -526,31 +457,21 @@ class TransactionCommandServiceImplTest {
 
         when(validator.validate(any())).thenReturn(Set.of());
 
-        pb.merchant.Merchant.MerchantResponse merchantResp =
-                pb.merchant.Merchant.MerchantResponse.newBuilder()
-                        .setId(1).setUserId(1).setApiKey("api-key-1").build();
-        when(merchantQueryService.findByApiKey(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.merchant.Merchant.ApiResponseMerchant.newBuilder()
-                                .setData(merchantResp).setStatus("success").build()));
+        when(merchantPort.findByApiKey(any()))
+                .thenReturn(Uni.createFrom().item(merchant(1, 1)));
 
-        when(cardQueryService.findUserCardByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.card.Card.CardWithEmailResponse.newBuilder()
-                                .setCardNumber("4111111111111111").build()));
+        when(cardPort.findUserCardByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(card("4111111111111111", null)));
 
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setTotalBalance(100_000).build())
-                                .setStatus("success").build()));
+        when(saldoPort.findByCardNumber(any()))
+                .thenReturn(Uni.createFrom().item(saldo("4111111111111111", 100_000)));
 
-        // First debit (customer) succeeds
-        when(saldoCommandService.updateSaldoBalance(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setStatus("success").build()));
+        // First debit (customer) succeeds, second (merchant credit) fails
+        when(saldoPort.updateSaldoBalance(any()))
+                .thenReturn(Uni.createFrom().item(mutation("4111111111111111", 95_000)))
+                .thenReturn(Uni.createFrom().failure(
+                        new io.grpc.StatusRuntimeException(
+                                io.grpc.Status.UNAVAILABLE.withDescription("merchant credit failed"))));
 
         when(transactionCommandRepository.persist(any(com.sanedge.transaction.entity.Transaction.class)))
                 .thenAnswer(inv -> {
@@ -565,38 +486,8 @@ class TransactionCommandServiceImplTest {
                 });
 
         // Merchant card lookup succeeds
-        when(cardQueryService.findByUserIdCard(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.card.Card.ApiResponseCard.newBuilder()
-                                .setStatus("success")
-                                .setData(pb.card.Card.CardResponse.newBuilder()
-                                        .setCardNumber("9999999999999999").build())
-                                .build()));
-
-        // Merchant saldo query succeeds
-        when(saldoQueryService.findByCardNumber(any()))
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setTotalBalance(50_000).build())
-                                .setStatus("success").build()))
-                // Second call (merchant card) also succeeds
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setData(pb.saldo.Saldo.SaldoResponse.newBuilder()
-                                        .setTotalBalance(50_000).build())
-                                .setStatus("success").build()));
-
-        // CREDIT FAILS: second updateSaldoBalance call throws
-        org.mockito.Mockito.when(saldoCommandService.updateSaldoBalance(any()))
-                // First call succeeds (debit)
-                .thenReturn(Uni.createFrom().item(
-                        pb.saldo.Saldo.ApiResponseSaldo.newBuilder()
-                                .setStatus("success").build()))
-                // Second call fails (credit)
-                .thenReturn(Uni.createFrom().failure(
-                        new io.grpc.StatusRuntimeException(
-                                io.grpc.Status.UNAVAILABLE.withDescription("merchant credit failed"))));
+        when(cardPort.findCardByUserId(any(Integer.class)))
+                .thenReturn(Uni.createFrom().item(card("9999999999999999", null)));
 
         try {
             transactionCommandService.create("api-key-1", req)

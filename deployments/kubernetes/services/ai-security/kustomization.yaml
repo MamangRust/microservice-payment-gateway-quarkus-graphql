@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Tidak punya HPA.
+resources:
+  - ai-security-deployment.yaml
+  - ai-security-service.yaml
+  - network-policy.yaml

@@ -13,11 +13,9 @@ import pb.card.Card.CardWithEmailResponse;
 import pb.card.Card.ApiResponseCard;
 import pb.card.CardQuery.ApiResponsePaginationCard;
 import pb.card.CardQuery.ApiResponsePaginationCardDeleteAt;
-import pb.user.UserQueryService;
-import pb.user.User.FindByIdUserRequest;
+import com.sanedge.common.adapter.user.UserPort;
 
 import io.grpc.Status;
-import io.quarkus.grpc.GrpcClient;
 import io.quarkus.grpc.GrpcService;
 import io.quarkus.hibernate.reactive.panache.Panache;
 import io.smallrye.mutiny.Uni;
@@ -31,8 +29,8 @@ public class CardQueryGrpcHandler extends MutinyCardQueryServiceGrpc.CardQuerySe
     @Inject
     CardQueryService cardQueryService;
 
-    @GrpcClient("user")
-    UserQueryService userQueryService;
+    @Inject
+    UserPort userPort;
 
     @Override
     public Uni<ApiResponsePaginationCard> findAllCard(FindAllCardRequest request) {
@@ -168,15 +166,11 @@ public class CardQueryGrpcHandler extends MutinyCardQueryServiceGrpc.CardQuerySe
                         populateCardWithEmail(builder, card, "");
                         return Uni.createFrom().item(builder.build());
                     }
-                    return userQueryService
-                            .findById(FindByIdUserRequest.newBuilder().setId(card.getUserId().intValue()).build())
-                            .map(userResp -> {
-                                String email = "";
-                                if (userResp != null && userResp.hasData()) {
-                                    email = userResp.getData().getEmail();
-                                }
+                    return userPort
+                            .findById(card.getUserId().intValue())
+                            .map(user -> {
                                 CardWithEmailResponse.Builder builder = CardWithEmailResponse.newBuilder();
-                                populateCardWithEmail(builder, card, email);
+                                populateCardWithEmail(builder, card, user.email());
                                 return builder.build();
                             })
                             .onFailure().recoverWithItem(e -> {

@@ -8,6 +8,11 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.model.Card;
+import com.sanedge.common.adapter.model.Merchant;
+import com.sanedge.common.adapter.merchant.MerchantPort;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.common.config.RedisService;
 import com.sanedge.common.domain.response.ApiResponse;
 import com.sanedge.common.enums.Status;
@@ -29,7 +34,6 @@ import com.sanedge.transaction.service.KafkaService;
 import com.sanedge.transaction.service.TransactionCommandService;
 
 import io.opentelemetry.api.common.Attributes;
-import io.quarkus.grpc.GrpcClient;
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.JsonObject;
@@ -38,10 +42,6 @@ import jakarta.inject.Inject;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.merchant.MerchantQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
 
 @ApplicationScoped
 public class TransactionCommandServiceImpl implements TransactionCommandService {
@@ -49,10 +49,9 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
 
         private final TransactionQueryRepository transactionQueryRepository;
         private final TransactionCommandRepository transactionCommandRepository;
-        private final MerchantQueryService merchantQueryService;
-        private final SaldoQueryService saldoQueryService;
-        private final SaldoCommandService saldoCommandService;
-        private final CardQueryService cardQueryService;
+        private final MerchantPort merchantPort;
+        private final SaldoPort saldoPort;
+        private final CardPort cardPort;
         private final Validator validator;
         private final RedisService redisService;
         private final KafkaService kafkaService;
@@ -62,10 +61,9 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
         @Inject
         public TransactionCommandServiceImpl(TransactionQueryRepository transactionQueryRepository,
                         TransactionCommandRepository transactionCommandRepository,
-                        @GrpcClient("merchant") MerchantQueryService merchantQueryService,
-                        @GrpcClient("saldo") SaldoQueryService saldoQueryService,
-                        @GrpcClient("saldo") SaldoCommandService saldoCommandService,
-                        @GrpcClient("card") CardQueryService cardQueryService,
+                        MerchantPort merchantPort,
+                        SaldoPort saldoPort,
+                        CardPort cardPort,
                         Validator validator,
                         RedisService redisService,
                         KafkaService kafkaService,
@@ -73,10 +71,9 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                         OutboxRepository outboxRepository) {
                 this.transactionQueryRepository = transactionQueryRepository;
                 this.transactionCommandRepository = transactionCommandRepository;
-                this.merchantQueryService = merchantQueryService;
-                this.saldoQueryService = saldoQueryService;
-                this.saldoCommandService = saldoCommandService;
-                this.cardQueryService = cardQueryService;
+                this.merchantPort = merchantPort;
+                this.saldoPort = saldoPort;
+                this.cardPort = cardPort;
                 this.validator = validator;
                 this.redisService = redisService;
                 this.kafkaService = kafkaService;
@@ -185,7 +182,7 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                                     String.valueOf(req.getMerchantId())));
         }
 
-        private Uni<ApiResponse<TransactionResponse>> createInternal(String apiKey, CreateTransactionRequest req) {
+                private Uni<ApiResponse<TransactionResponse>> createInternal(String apiKey, CreateTransactionRequest req) {
                 try {
                         validateRequest(req);
                 } catch (Exception e) {
@@ -197,236 +194,66 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                 final Transaction[] ledgerRef = new Transaction[1];
 
                 return tracingMetrics.traceAndMeasure("createTransaction", "create", attrs, () -> {
-                        return merchantQueryService
-                                        .findByApiKey(pb.merchant.Merchant.FindByApiKeyRequest.newBuilder()
-                                                        .setApiKey(apiKey).build())
-                                        .chain(merchantResponse -> {
-                                                if (merchantResponse == null || !merchantResponse.hasData()) {
-                                                        return Uni.createFrom().failure(new ResourceNotFoundException(
-                                                                        "Merchant not found"));
-                                                }
-                                                pb.merchant.Merchant.MerchantResponse merchant = merchantResponse
-                                                                .getData();
-                                                return cardQueryService.findUserCardByCardNumber(
-                                                                pb.card.Card.FindByCardNumberRequest
-                                                                                .newBuilder()
-                                                                                .setCardNumber(req.getCardNumber())
-                                                                                .build())
-                                                                .chain(cardWithEmail -> {
-                                                                        if (cardWithEmail == null || cardWithEmail
-                                                                                        .getCardNumber() == null
-                                                                                        || cardWithEmail.getCardNumber()
-                                                                                                        .isEmpty()) {
-                                                                                return Uni.createFrom().failure(
-                                                                                                new ResourceNotFoundException(
-                                                                                                                "Card not found"));
-                                                                        }
-                                                                        pb.card.Card.CardResponse card = pb.card.Card.CardResponse
-                                                                                        .newBuilder()
-                                                                                        .setCardNumber(cardWithEmail
-                                                                                                        .getCardNumber())
-                                                                                        .build();
-                                                                        return saldoQueryService.findByCardNumber(
-                                                                                        pb.card.Card.FindByCardNumberRequest
-                                                                                                        .newBuilder()
-                                                                                                        .setCardNumber(req
-                                                                                                                        .getCardNumber())
-                                                                                                        .build())
-                                                                                        .chain(saldoResponse -> {
-                                                                                                if (saldoResponse == null
-                                                                                                                || !saldoResponse
-                                                                                                                                .hasData()) {
-                                                                                                        return Uni.createFrom()
-                                                                                                                        .failure(new ResourceNotFoundException(
-                                                                                                                                        "Saldo not found"));
-                                                                                                }
-                                                                                                pb.saldo.Saldo.SaldoResponse saldo = saldoResponse
-                                                                                                                .getData();
-                                                                                                if (saldo.getTotalBalance() < req
-                                                                                                                .getAmount()) {
-                                                                                                        logger.error("Insufficient balance, requested: {}, available: {}",
-                                                                                                                        req.getAmount(),
-                                                                                                                        saldo.getTotalBalance());
-                                                                                                        return Uni.createFrom()
-                                                                                                                        .failure(new ResourceNotFoundException(
-                                                                                                                                        "Insufficient balance"));
-                                                                                                }
+                        return merchantPort
+                                        .findByApiKey(apiKey)
+                                        .chain(merchant -> cardPort.findUserCardByCardNumber(req.getCardNumber())
+                                                        .chain(card -> saldoPort
+                                                                        .findByCardNumber(req.getCardNumber())
+                                                                        .chain(saldo -> {
+                                                                                if (saldo.totalBalance() < req.getAmount()) {
+                                                                                        logger.error("Insufficient balance, requested: {}, available: {}",
+                                                                                                        req.getAmount(),
+                                                                                                        saldo.totalBalance());
+                                                                                        return Uni.createFrom()
+                                                                                                        .failure(new ResourceNotFoundException(
+                                                                                                                        "Insufficient balance"));
+                                                                                }
 
-                                                                                                Long updatedSaldo = (long) saldo
-                                                                                                                .getTotalBalance()
-                                                                                                                - req.getAmount();
+                                                                                Long updatedSaldo = (long) saldo.totalBalance()
+                                                                                                - req.getAmount();
 
-                                                                                                Transaction transactionEntity = new Transaction();
-                                                                                                UUID transactionNo = UUID
-                                                                                                                .randomUUID();
+                                                                                Transaction transactionEntity = new Transaction();
+                                                                                UUID transactionNo = UUID.randomUUID();
 
-                                                                                                transactionEntity
-                                                                                                                .setCardNumber(req
-                                                                                                                                .getCardNumber());
-                                                                                                transactionEntity
-                                                                                                                .setMerchantId(req
-                                                                                                                                .getMerchantId()
-                                                                                                                                .intValue());
-                                                                                                transactionEntity
-                                                                                                                .setAmount(req.getAmount()
-                                                                                                                                .intValue());
-                                                                                                transactionEntity
-                                                                                                                .setPaymentMethod(
-                                                                                                                                req.getPaymentMethod());
-                                                                                                transactionEntity
-                                                                                                                .setTransactionTime(
-                                                                                                                                Timestamp.valueOf(
-                                                                                                                                                LocalDateTime.now()));
-                                                                                                transactionEntity
-                                                                                                                .setTransactionNo(
-                                                                                                                                transactionNo);
-                                                                                                transactionEntity
-                                                                                                                .setRequestFingerprint(RequestFingerprint.sha256(
-                                                                                                                                req.getCardNumber(), String.valueOf(req.getAmount()),
-                                                                                                                                req.getPaymentMethod(), String.valueOf(req.getMerchantId())));
-                                                                                                transactionEntity
-                                                                                                                .setIdempotencyKey(req.getIdempotencyKey() == null
-                                                                                                                                || req.getIdempotencyKey().isBlank() ? null
-                                                                                                                                                : req.getIdempotencyKey());                                                                                                transactionEntity
-                                                                                                                .setStatus(Status.PENDING);
-                                                                                                transactionEntity
-                                                                                                                .setCompensationLegACard(card.getCardNumber());
-                                                                                                transactionEntity
-                                                                                                                .setCompensationLegADelta(-req.getAmount().intValue());
-                                                                                                ledgerRef[0] = transactionEntity;
+                                                                                transactionEntity.setCardNumber(req.getCardNumber());
+                                                                                transactionEntity.setMerchantId(req.getMerchantId().intValue());
+                                                                                transactionEntity.setAmount(req.getAmount().intValue());
+                                                                                transactionEntity.setPaymentMethod(req.getPaymentMethod());
+                                                                                transactionEntity.setTransactionTime(Timestamp.valueOf(LocalDateTime.now()));
+                                                                                transactionEntity.setTransactionNo(transactionNo);
+                                                                                transactionEntity.setRequestFingerprint(RequestFingerprint.sha256(
+                                                                                                req.getCardNumber(), String.valueOf(req.getAmount()),
+                                                                                                req.getPaymentMethod(), String.valueOf(req.getMerchantId())));
+                                                                                transactionEntity.setIdempotencyKey(req.getIdempotencyKey() == null
+                                                                                                || req.getIdempotencyKey().isBlank() ? null
+                                                                                                                : req.getIdempotencyKey());
+                                                                                transactionEntity.setStatus(Status.PENDING);
+                                                                                transactionEntity.setCompensationLegACard(card.cardNumber());
+                                                                                transactionEntity.setCompensationLegADelta(-req.getAmount().intValue());
+                                                                                ledgerRef[0] = transactionEntity;
 
-                                                                                                return saldoCommandService
-                                                                                                                .updateSaldoBalance(
-                                                                                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                .newBuilder().setCardNumber(card
-                                                                                                                                                                .getCardNumber())
-                                                                                                                                                 .setTotalBalance(
-                                                                                                                                                                updatedSaldo.intValue())
-                                                                                                                                                 .setDeltaBalance(-req.getAmount().intValue())
-                                                                                                                                                 .setMinimumBalance(0)
-                                                                                                                                                 .setOperationKey(saldoOperationKey("txn", req.getIdempotencyKey(), null))
-                                                                                                                                                 .build())
-                                                                                                                .chain(v -> {
-                                                                                                                        transactionEntity
-                                                                                                                                .setCompensationLegAApplied(true);
-                                                                                                                        return transactionCommandRepository
-                                                                                                                                                .persist(transactionEntity);
-                                                                                                                })
-                                                                                                                .chain(persistedTx -> {
-                                                                                                                        return transactionCommandRepository
-                                                                                                                                        .updateTransactionStatus(
-                                                                                                                                                        persistedTx.getTransactionId(),
-                                                                                                                                                        Status.SUCCESS.toString())
-                                                                                                                                        .chain(updatedTx -> persistOutboxEvent(updatedTx)
-                                                                                                                                                        .replaceWith(updatedTx))
-                                                                                                                                        .chain(updatedTx -> {
-                                                                                                                                                return cardQueryService
-                                                                                                                                                                .findByUserIdCard(
-                                                                                                                                                                                pb.card.Card.FindByUserIdCardRequest
-                                                                                                                                                                                                .newBuilder()
-                                                                                                                                                                                                .setUserId(merchant
-                                                                                                                                                                                                                .getUserId())
-                                                                                                                                                                                                .build())
-                                                                                                                                                                .chain(merchantCardResponse -> {
-                                                                                                                                                                        if (merchantCardResponse == null
-                                                                                                                                                                                        || !merchantCardResponse
-                                                                                                                                                                                                        .hasData()) {
-                                                                                                                                                                                return Uni.createFrom()
-                                                                                                                                                                                                .failure(new ResourceNotFoundException(
-                                                                                                                                                                                                                "Merchant card not found"));
-                                                                                                                                                                        }
-                                                                                                                                                                        pb.card.Card.CardResponse merchantCard = merchantCardResponse
-                                                                                                                                                                                        .getData();
-                                                                                                                                                                        return saldoQueryService
-                                                                                                                                                                                        .findByCardNumber(
-                                                                                                                                                                                                        pb.card.Card.FindByCardNumberRequest
-                                                                                                                                                                                                                        .newBuilder()
-                                                                                                                                                                                                                        .setCardNumber(merchantCard
-                                                                                                                                                                                                                                        .getCardNumber())
-                                                                                                                                                                                                                        .build())
-                                                                                                                                                                                        .chain(merchantSaldoResponse -> {
-                                                                                                                                                                                                if (merchantSaldoResponse == null
-                                                                                                                                                                                                                || !merchantSaldoResponse
-                                                                                                                                                                                                                                .hasData()) {
-                                                                                                                                                                                                        return Uni.createFrom()
-                                                                                                                                                                                                                        .failure(new ResourceNotFoundException(
-                                                                                                                                                                                                                                        "Merchant saldo not found"));
-                                                                                                                                                                                                }
-                                                                                                                                                                                                pb.saldo.Saldo.SaldoResponse merchantSaldo = merchantSaldoResponse
-                                                                                                                                                                                                                .getData();
-                                                                                                                                                                                                Long updatedMerchantSaldo = (long) merchantSaldo
-                                                                                                                                                                                                                .getTotalBalance()
-                                                                                                                                                                                                                + req.getAmount();                                                                                                return saldoCommandService
-                                                                                                                .updateSaldoBalance(
-                                                                                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                .newBuilder().setCardNumber(merchantCard
-                                                                                                                                                                .getCardNumber())
-                                                                                                                                                 .setTotalBalance(
-                                                                                                                                                                updatedMerchantSaldo
-                                                                                                                                                                .intValue())
-                                                                                                                                                 .setDeltaBalance(req.getAmount().intValue())
-                                                                                                                                                 .setMinimumBalance(0)
-                                                                                                                                                 .setOperationKey(saldoOperationKey("txn", req.getIdempotencyKey(), "merchant"))
-                                                                                                                                                 .build())
-                                                                                                                                                .chain(v2b -> {
-                                                                                                                                                        transactionEntity
-                                                                                                                                                                        .setCompensationLegBCard(merchantCard
-                                                                                                                                                                                        .getCardNumber());
-                                                                                                                                                        transactionEntity
-                                                                                                                                                                        .setCompensationLegBDelta(req.getAmount()
-                                                                                                                                                                                        .intValue());
-                                                                                                                                                        transactionEntity
-                                                                                                                                                                        .setCompensationLegBApplied(true);
-                                                                                                                                                        return transactionCommandRepository
-                                                                                                                                                                        .persist(transactionEntity)
-                                                                                                                                                                        .replaceWith(v2b);
-                                                                                                                                                })
-                                                                                                                                                                                                                .chain(v2 -> evictCaches(
-                                                                                                                                                                                                                                req.getCardNumber(),
-                                                                                                                                                                                                                                merchantCard.getCardNumber(),
-                                                                                                                                                                                                                                (long) merchant.getId(),
-                                                                                                                                                                                                                                updatedTx.getTransactionId()))
-                                                                                                                                                                                                                .chain(v3 -> {
-                                                                                                                                                                                                                        if (cardWithEmail
-                                                                                                                                                                                                                                        .getEmail() != null
-                                                                                                                                                                                                                                        && !cardWithEmail
-                                                                                                                                                                                                                                                        .getEmail()
-                                                                                                                                                                                                                                                        .isEmpty()) {
-                                                                                                                                                                                                                                String emailSubject = "Transaction Successful - SanEdge";
-                                                                                                                                                                                                                                String emailBody = String
-                                                                                                                                                                                                                                                .format(
-                                                                                                                                                                                                                                                                "Hello,\n\nYour transaction of %d has been processed successfully.\n\nRegards,\nSupport Team",
-                                                                                                                                                                                                                                                                req.getAmount().intValue());
-
-                                                                                                                                                                                                                                JsonObject emailPayload = new JsonObject()
-                                                                                                                                                                                                                                                .put("email", cardWithEmail
-                                                                                                                                                                                                                                                                .getEmail())
-                                                                                                                                                                                                                                                .put("subject", emailSubject)
-                                                                                                                                                                                                                                                .put("body", emailBody);kafkaService
-                                                                                                                                                                                                                                                .sendMessage("email-service-topic-transaction-create",
-                                                                                                                                                                                                                                                                String.valueOf(updatedTx
-                                                                                                                                                                                                                                                                                .getTransactionId()),
-                                                                                                                                                                                                                                                                emailPayload)
-                                                                                                                                                                                                                                                .onFailure().invoke(e -> logger.warn("Kafka email failed for txn {}: {}", updatedTx.getTransactionId(), e.getMessage()))
-                                                                                                                                                                                                                                                .subscribe().with(v -> {}, e -> {});
-                                                                                                                                                                                                                        }
-
-                                                                                                                                                                                                                                                TransactionResponse response = TransactionResponse
-                                                                                                                                                                                                                                                                .from(updatedTx);
-                                                                                                                                                                                                                                                logger.info("CreateTransaction completed, transaction_id={}",
-                                                                                                                                                                                                                                                                response.getId());
-
-                                                                                                                                                                                                                                                return Uni.createFrom().item(ApiResponse
-                                                                                                                                                                                                                                                                .success("Transaction created successfully",
-                                                                                                                                                                                                                                                                                response));
-                                                                                                                                                                                                                });
-                                                                                                                                                                                        });
-                                                                                                                                                                });
-                                                                                                                                        });
-                                                                                                                });
-                                                                                        });
-                                                                });
-                                        });
+                                                                                return saldoPort
+                                                                                                .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                card.cardNumber(),
+                                                                                                                updatedSaldo.intValue(),
+                                                                                                                -req.getAmount().intValue(),
+                                                                                                                0, null, null,
+                                                                                                                saldoOperationKey("txn", req.getIdempotencyKey(), null)))
+                                                                                                .chain(v -> {
+                                                                                                        transactionEntity.setCompensationLegAApplied(true);
+                                                                                                        return transactionCommandRepository
+                                                                                                                        .persist(transactionEntity);
+                                                                                                })
+                                                                                                .chain(persistedTx -> transactionCommandRepository
+                                                                                                                .updateTransactionStatus(
+                                                                                                                                persistedTx.getTransactionId(),
+                                                                                                                                Status.SUCCESS.toString())
+                                                                                                                .chain(updatedTx -> persistOutboxEvent(updatedTx)
+                                                                                                                                .replaceWith(updatedTx))
+                                                                                                                .chain(updatedTx -> creditMerchantBalance(
+                                                                                                                                transactionEntity, merchant, card,
+                                                                                                                                req, updatedTx)));
+                                                                        })));
                 }).onFailure().recoverWithUni(e -> {
                         if (ledgerRef[0] != null && ledgerRef[0].getTransactionId() != null) {
                                 return transactionCommandRepository
@@ -438,6 +265,72 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                                         "Error in create transaction: " + e.getMessage(), null));
                 });
         }
+
+        private Uni<ApiResponse<TransactionResponse>> creditMerchantBalance(
+                        Transaction transactionEntity, Merchant merchant, Card card,
+                        CreateTransactionRequest req, Transaction updatedTx) {
+                return cardPort
+                                .findCardByUserId(merchant.userId())
+                                .chain(merchantCard -> saldoPort
+                                                .findByCardNumber(merchantCard.cardNumber())
+                                                .chain(merchantSaldo -> {
+                                                        Long updatedMerchantSaldo = (long) merchantSaldo
+                                                                        .totalBalance()
+                                                                        + req.getAmount();
+                                                        return saldoPort
+                                                                        .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                        merchantCard.cardNumber(),
+                                                                                        updatedMerchantSaldo.intValue(),
+                                                                                        req.getAmount().intValue(),
+                                                                                        0, null, null,
+                                                                                        saldoOperationKey("txn", req.getIdempotencyKey(), "merchant")))
+                                                                        .chain(v2b -> {
+                                                                                transactionEntity.setCompensationLegBCard(merchantCard.cardNumber());
+                                                                                transactionEntity.setCompensationLegBDelta(req.getAmount().intValue());
+                                                                                transactionEntity.setCompensationLegBApplied(true);
+                                                                                return transactionCommandRepository
+                                                                                                .persist(transactionEntity)
+                                                                                                .replaceWith(v2b);
+                                                                        })
+                                                                        .chain(v2 -> evictCaches(
+                                                                                        req.getCardNumber(),
+                                                                                        merchantCard.cardNumber(),
+                                                                                        (long) merchant.id(),
+                                                                                        updatedTx.getTransactionId()))
+                                                                        .chain(v3 -> {
+                                                                                if (card.email() != null && !card.email().isEmpty()) {
+                                                                                        String emailSubject = "Transaction Successful - SanEdge";
+                                                                                        String emailBody = String.format(
+                                                                                                        "Hello,\n\nYour transaction of %d has been processed successfully.\n\nRegards,\nSupport Team",
+                                                                                                        req.getAmount().intValue());
+
+                                                                                        JsonObject emailPayload = new JsonObject()
+                                                                                                        .put("email", card.email())
+                                                                                                        .put("subject", emailSubject)
+                                                                                                        .put("body", emailBody);
+                                                                                        kafkaService
+                                                                                                        .sendMessage("email-service-topic-transaction-create",
+                                                                                                                        String.valueOf(updatedTx.getTransactionId()),
+                                                                                                                        emailPayload)
+                                                                                                        .onFailure().invoke(e -> logger.warn(
+                                                                                                                        "Kafka email failed for txn {}: {}",
+                                                                                                                        updatedTx.getTransactionId(),
+                                                                                                                        e.getMessage()))
+                                                                                                        .subscribe().with(v -> {}, e -> {});
+                                                                                }
+
+                                                                                TransactionResponse response = TransactionResponse
+                                                                                                .from(updatedTx);
+                                                                                logger.info("CreateTransaction completed, transaction_id={}",
+                                                                                                response.getId());
+
+                                                                                return Uni.createFrom().item(ApiResponse
+                                                                                                .success("Transaction created successfully",
+                                                                                                                response));
+                                                                        });
+                                                }));
+        }
+
 
         @Override
         @WithTransaction
@@ -463,21 +356,11 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                                                         return Uni.createFrom().failure(new ResourceNotFoundException(
                                                                         "Transaction " + transactionId + " not found"));
                                                 }
-                                                return merchantQueryService
-                                                                .findByApiKey(pb.merchant.Merchant.FindByApiKeyRequest
-                                                                                .newBuilder().setApiKey(apiKey).build())
-                                                                .chain(merchantResponse -> {
-                                                                        if (merchantResponse == null
-                                                                                        || !merchantResponse
-                                                                                                        .hasData()) {
-                                                                                return Uni.createFrom().failure(
-                                                                                                new ResourceNotFoundException(
-                                                                                                                "Merchant not found"));
-                                                                        }
-                                                                        pb.merchant.Merchant.MerchantResponse merchant = merchantResponse
-                                                                                        .getData();
+                                                return merchantPort
+                                                                .findByApiKey(apiKey)
+                                                                .chain(merchant -> {
                                                                         if (!transaction.getMerchantId()
-                                                                                        .equals(merchant.getId())) {
+                                                                                        .equals(merchant.id())) {
                                                                                 logger.error("Unauthorized access to transaction {}",
                                                                                                 transactionId);
                                                                                 return transactionCommandRepository
@@ -489,114 +372,77 @@ public class TransactionCommandServiceImpl implements TransactionCommandService 
                                                                                                                                 "unauthorized access")));
                                                                         }
 
-                                                                        return cardQueryService.findByCardNumber(
-                                                                                        pb.card.Card.FindByCardNumberRequest
-                                                                                                        .newBuilder()
-                                                                                                        .setCardNumber(transaction
-                                                                                                                        .getCardNumber())
-                                                                                                        .build())
-                                                                                        .chain(cardResponse -> {
-                                                                                                if (cardResponse == null
-                                                                                                                || !cardResponse.hasData()) {
-                                                                                                        return Uni.createFrom()
-                                                                                                                        .failure(new ResourceNotFoundException(
-                                                                                                                                        "Card not found"));
-                                                                                                }
-                                                                                                pb.card.Card.CardResponse card = cardResponse
-                                                                                                                .getData();
-                                                                                                return saldoQueryService
-                                                                                                                .findByCardNumber(
-                                                                                                                                pb.card.Card.FindByCardNumberRequest
-                                                                                                                                                .newBuilder()
-                                                                                                                                                .setCardNumber(card
-                                                                                                                                                                .getCardNumber())
-                                                                                                                                                .build())
-                                                                                                                .chain(saldoResponse -> {
-                                                                                                                        if (saldoResponse == null
-                                                                                                                                        || !saldoResponse
-                                                                                                                                                        .hasData()) {
-                                                                                                                                return Uni.createFrom()
-                                                                                                                                                .failure(new ResourceNotFoundException(
-                                                                                                                                                                "Saldo not found"));
-                                                                                                                        }
-                                                                                                                        pb.saldo.Saldo.SaldoResponse saldo = saldoResponse
-                                                                                                                                        .getData();
+                                                                        return cardPort.findCardByCardNumber(
+                                                                                        transaction.getCardNumber())
+                                                                                        .chain(card -> saldoPort
+                                                                                                        .findByCardNumber(card.cardNumber())
+                                                                                                        .chain(saldo -> {
+                                                                                                                Long restoredBalance = (long) saldo
+                                                                                                                                .totalBalance()
+                                                                                                                                + transaction.getAmount()
+                                                                                                                                                .longValue();
 
-                                                                                                                        Long restoredBalance = (long) saldo
-                                                                                                                                        .getTotalBalance()
-                                                                                                                                        + transaction.getAmount()
-                                                                                                                                                        .longValue();
+                                                                                                                return saldoPort
+                                                                                                                                .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                                                card.cardNumber(),
+                                                                                                                                                restoredBalance.intValue(),
+                                                                                                                                                null, null, null, null, null))
+                                                                                                                                .chain(v1 -> {
+                                                                                                                                        if (restoredBalance < req
+                                                                                                                                                        .getAmount()) {
+                                                                                                                                                logger.error("Insufficient balance after restore, available={}, requested={}",
+                                                                                                                                                                restoredBalance,
+                                                                                                                                                                req.getAmount());
+                                                                                                                                                return transactionCommandRepository
+                                                                                                                                                                .updateTransactionStatus(
+                                                                                                                                                                                transactionId,
+                                                                                                                                                                                Status.FAILED.toString())
+                                                                                                                                                                .chain(v2 -> Uni.createFrom()
+                                                                                                                                                                                .failure(new ResourceNotFoundException(
+                                                                                                                                                                                                "Insufficient balance")));
+                                                                                                                                        }
 
-                                                                                                                        return saldoCommandService
-                                                                                                                                        .updateSaldoBalance(
-                                                                                                                                                        pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                                        .newBuilder()
-                                                                                                                                                                        .setCardNumber(card
-                                                                                                                                                                                        .getCardNumber())
-                                                                                                                                                                        .setTotalBalance(
-                                                                                                                                                                                        restoredBalance.intValue())
-                                                                                                                                                                        .build())
-                                                                                                                                        .chain(v1 -> {
-                                                                                                                                                if (restoredBalance < req
-                                                                                                                                                                .getAmount()) {
-                                                                                                                                                        logger.error("Insufficient balance after restore, available={}, requested={}",
-                                                                                                                                                                        restoredBalance,
-                                                                                                                                                                        req.getAmount());
-                                                                                                                                                        return transactionCommandRepository
+                                                                                                                                        Long updatedBalance = restoredBalance
+                                                                                                                                                        - req.getAmount();
+
+                                                                                                                                        transaction.setAmount(
+                                                                                                                                                        req.getAmount().intValue());
+                                                                                                                                        transaction.setPaymentMethod(
+                                                                                                                                                        req.getPaymentMethod());
+                                                                                                                                        transaction.setTransactionTime(
+                                                                                                                                                        req.getTransactionTime() != null
+                                                                                                                                                                        ? Timestamp.valueOf(
+                                                                                                                                                                                        req.getTransactionTime())
+                                                                                                                                                                        : new java.sql.Timestamp(
+                                                                                                                                                                                        System.currentTimeMillis()));
+
+                                                                                                                                        return saldoPort
+                                                                                                                                                        .updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                                                                                                                                                                        card.cardNumber(),
+                                                                                                                                                                        updatedBalance.intValue(),
+                                                                                                                                                                        null, null, null, null, null))
+                                                                                                                                                        .chain(v3 -> transactionCommandRepository
+                                                                                                                                                                        .persist(transaction))
+                                                                                                                                                        .chain(v4 -> transactionCommandRepository
                                                                                                                                                                         .updateTransactionStatus(
                                                                                                                                                                                         transactionId,
-                                                                                                                                                                                        Status.FAILED.toString())
-                                                                                                                                                                        .chain(v2 -> Uni.createFrom()
-                                                                                                                                                                                        .failure(new ResourceNotFoundException(
-                                                                                                                                                                                                        "Insufficient balance")));
-                                                                                                                                                }
-
-                                                                                                                                                Long updatedBalance = restoredBalance
-                                                                                                                                                                - req.getAmount();
-
-                                                                                                                                                transaction.setAmount(
-                                                                                                                                                                req.getAmount().intValue());
-                                                                                                                                                transaction.setPaymentMethod(
-                                                                                                                                                                req.getPaymentMethod());
-                                                                                                                                                transaction.setTransactionTime(
-                                                                                                                                                                req.getTransactionTime() != null
-                                                                                                                                                                                ? Timestamp.valueOf(
-                                                                                                                                                                                                req.getTransactionTime())
-                                                                                                                                                                                : new java.sql.Timestamp(
-                                                                                                                                                                                                System.currentTimeMillis()));
-
-                                                                                                                                                return saldoCommandService
-                                                                                                                                                                .updateSaldoBalance(
-                                                                                                                                                                                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest
-                                                                                                                                                                                                .newBuilder()
-                                                                                                                                                                                                .setCardNumber(card
-                                                                                                                                                                                                                .getCardNumber())
-                                                                                                                                                                                                .setTotalBalance(
-                                                                                                                                                                                                                updatedBalance.intValue())
-                                                                                                                                                                                                .build())
-                                                                                                                                                                .chain(v3 -> transactionCommandRepository
-                                                                                                                                                                                .persist(transaction))
-                                                                                                                                                                .chain(v4 -> transactionCommandRepository
-                                                                                                                                                                                .updateTransactionStatus(
-                                                                                                                                                                                                transactionId,
-                                                                                                                                                                                                Status.SUCCESS.toString()))
-                                                                                                                                                                .chain(updatedTx -> evictCaches(
-                                                                                                                                                                                card.getCardNumber(),
-                                                                                                                                                                                null,
-                                                                                                                                                                                (long) merchant.getId(),
-                                                                                                                                                                                transactionId)
-                                                                                                                                                                                .map(v5 -> {
-                                                                                                                                                                                        TransactionResponse response = TransactionResponse
-                                                                                                                                                                                                        .from(updatedTx);
-                                                                                                                                                                                        logger.info("Transaction {} updated successfully",
-                                                                                                                                                                                                        transactionId);
-                                                                                                                                                                                        return ApiResponse
-                                                                                                                                                                                                        .success("Transaction updated successfully",
-                                                                                                                                                                                                                        response);
-                                                                                                                                                                                }));
-                                                                                                                                        });
-                                                                                                                });
-                                                                                        });
+                                                                                                                                                                                        Status.SUCCESS.toString()))
+                                                                                                                                                        .chain(updatedTx -> evictCaches(
+                                                                                                                                                                        card.cardNumber(),
+                                                                                                                                                                        null,
+                                                                                                                                                                        (long) merchant.id(),
+                                                                                                                                                                        transactionId)
+                                                                                                                                                                        .map(v5 -> {
+                                                                                                                                                                                TransactionResponse response = TransactionResponse
+                                                                                                                                                                                                .from(updatedTx);
+                                                                                                                                                                                logger.info("Transaction {} updated successfully",
+                                                                                                                                                                                                transactionId);
+                                                                                                                                                                                return ApiResponse
+                                                                                                                                                                                                .success("Transaction updated successfully",
+                                                                                                                                                                                                                response);
+                                                                                                                                                                        }));
+                                                                                                                                });
+                                                                                                        }));
                                                                 });
                                         });
                 }).onFailure().recoverWithItem(e -> new ApiResponse<>("error",

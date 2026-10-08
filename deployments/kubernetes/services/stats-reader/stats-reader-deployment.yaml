@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stats-reader
+  namespace: payment-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stats-reader
+  template:
+    metadata:
+      labels:
+        app: stats-reader
+    spec:
+      serviceAccountName: app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: wait-for-clickhouse
+          image: busybox:1.35
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "[INIT] Waiting for ClickHouse to be ready (HTTP)..."
+              until nc -z clickhouse.payment-gateway.svc.cluster.local 8123; do
+                echo "ClickHouse is not ready yet. Retrying in 5 seconds..."
+                sleep 5
+              done
+              echo "[INIT] ClickHouse is accessible!"
+      containers:
+        - name: stats-reader
+          image: ghcr.io/__GHCR_OWNER__/microservice-payment-gateway-grpc/stats-reader:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          ports:
+            - containerPort: 50062
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Telemetry pipeline: collector, tracing, metrics, logging, alerting.
+resources:
+  - otel-collector-configmap.yaml # ConfigMap otel-config
+  - otel-collector-deployment.yaml # Deployment otel-collector
+  - otel-collector-service.yaml # Service otel-collector
+  - jaeger-deployment.yaml # Deployment jaeger
+  - jaeger-service.yaml # Service jaeger
+  - prometheus-configmap.yaml # ConfigMap prometheus-config
+  - prometheus-rules-configmap.yaml # ConfigMap prometheus-rules
+  - prometheus-deployment.yaml # Deployment prometheus
+  - prometheus-service.yaml # Service prometheus
+  - grafana-deployment.yaml # Deployment grafana
+  - grafana-service.yaml # Service grafana
+  - loki-configmaps.yaml # ConfigMap loki-config
+  - loki-deployment.yaml # Deployment loki
+  - loki-service.yaml # Service loki
+  - loki-pv.yaml # PersistentVolume loki-data-pv (cluster-scoped)
+  - loki-pvc.yaml # PersistentVolumeClaim loki-data-pvc
+  - alertmanager-config.yaml # ExternalSecret alertmanager-config
+  - alertmanager-deployment.yaml # Deployment alertmanager
+  - alertmanager-service.yaml # Service alertmanager
+  - node-exporter-daemon.yaml # DaemonSet node-exporter
+  - node-exporter-service.yaml # Service node-exporter
+  - kafka-exporter-deployment.yaml # Deployment kafka-exporter (Prometheus exporter)
+  - kafka-exporter-service.yaml # Service kafka-exporter

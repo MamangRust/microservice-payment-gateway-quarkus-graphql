@@ -27,7 +27,6 @@ import com.sanedge.withdraw.service.KafkaService;
 import com.sanedge.withdraw.service.WithdrawCommandService;
 
 import io.opentelemetry.api.common.Attributes;
-import io.quarkus.grpc.GrpcClient;
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.JsonObject;
@@ -36,9 +35,8 @@ import jakarta.inject.Inject;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Validator;
-import pb.card.CardQueryService;
-import pb.saldo.SaldoCommandService;
-import pb.saldo.SaldoQueryService;
+import com.sanedge.common.adapter.card.CardPort;
+import com.sanedge.common.adapter.saldo.SaldoPort;
 
 @ApplicationScoped
 public class WithdrawCommandServiceImpl implements WithdrawCommandService {
@@ -46,9 +44,8 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
 
     private final WithdrawQueryRepository withdrawQueryRepository;
     private final WithdrawCommandRepository withdrawCommandRepository;
-    private final CardQueryService cardQueryService;
-    private final SaldoQueryService saldoQueryService;
-    private final SaldoCommandService saldoCommandService;
+    private final CardPort cardPort;
+    private final SaldoPort saldoPort;
     private final Validator validator;
     private final RedisService redisService;
     private final KafkaService kafkaService;
@@ -58,9 +55,8 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
     @Inject
     public WithdrawCommandServiceImpl(WithdrawQueryRepository withdrawQueryRepository,
             WithdrawCommandRepository withdrawCommandRepository,
-            @GrpcClient("card") CardQueryService cardQueryService,
-            @GrpcClient("saldo") SaldoQueryService saldoQueryService,
-            @GrpcClient("saldo") SaldoCommandService saldoCommandService,
+            CardPort cardPort,
+            SaldoPort saldoPort,
             Validator validator,
             RedisService redisService,
             KafkaService kafkaService,
@@ -68,9 +64,8 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
             OutboxRepository outboxRepository) {
         this.withdrawQueryRepository = withdrawQueryRepository;
         this.withdrawCommandRepository = withdrawCommandRepository;
-        this.cardQueryService = cardQueryService;
-        this.saldoQueryService = saldoQueryService;
-        this.saldoCommandService = saldoCommandService;
+        this.cardPort = cardPort;
+        this.saldoPort = saldoPort;
         this.validator = validator;
         this.redisService = redisService;
         this.kafkaService = kafkaService;
@@ -170,34 +165,20 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
 
         return tracingMetrics.traceAndMeasure("createWithdraw", "create", attrs, () -> {
             final String[] senderEmailContainer = new String[1];
-            return cardQueryService
-                    .findUserCardByCardNumber(
-                            pb.card.Card.FindByCardNumberRequest.newBuilder().setCardNumber(req.getCardNumber())
-                                    .build())
-                    .chain(cardResponse -> {
-                        if (cardResponse == null || cardResponse.getCardNumber() == null
-                                || cardResponse.getCardNumber().isEmpty()) {
-                            logger.error("Card not found with number={}", req.getCardNumber());
-                            throw new ResourceNotFoundException("Card not found");
-                        }
-                        senderEmailContainer[0] = cardResponse.getEmail();
-                        return saldoQueryService.findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                .setCardNumber(req.getCardNumber()).build());
+            return cardPort
+                    .findUserCardByCardNumber(req.getCardNumber())
+                    .chain(card -> {
+                        senderEmailContainer[0] = card.email();
+                        return saldoPort.findByCardNumber(req.getCardNumber());
                     })
-                    .chain(saldoResponse -> {
-                        if (saldoResponse == null || !saldoResponse.hasData()) {
-                            logger.error("Saldo not found for card number={}", req.getCardNumber());
-                            throw new ResourceNotFoundException("Saldo not found");
-                        }
-                        pb.saldo.Saldo.SaldoResponse saldo = saldoResponse.getData();
-
-                        if (saldo.getTotalBalance() < req.getWithdrawAmount()) {
+                    .chain(saldo -> {
+                        if (saldo.totalBalance() < req.getWithdrawAmount()) {
                             logger.error("Insufficient balance for card number={}. Balance={}, Requested={}",
-                                    req.getCardNumber(), saldo.getTotalBalance(), req.getWithdrawAmount());
+                                    req.getCardNumber(), saldo.totalBalance(), req.getWithdrawAmount());
                             throw new IllegalStateException("Insufficient balance");
                         }
 
-                        int newBalance = saldo.getTotalBalance() - req.getWithdrawAmount().intValue();
+                        int newBalance = saldo.totalBalance() - req.getWithdrawAmount().intValue();
 
                         Withdraw withdraw = new Withdraw();
                         withdraw.setCardNumber(req.getCardNumber());
@@ -217,16 +198,15 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
                         withdraw.setCreatedAt(java.sql.Timestamp.valueOf(java.time.LocalDateTime.now()));
                         withdraw.setUpdatedAt(java.sql.Timestamp.valueOf(java.time.LocalDateTime.now()));
 
-                        return saldoCommandService
-                                .updateSaldoWithdraw(pb.saldo.SaldoCommand.UpdateSaldoWithdrawRequest.newBuilder()
-                                        .setCardNumber(saldo.getCardNumber())
-                                        .setTotalBalance(newBalance)
-                                        .setDeltaBalance(-req.getWithdrawAmount().intValue())
-                                        .setMinimumBalance(0)
-                                        .setWithdrawTime(withdraw.getWithdrawTime().toString())
-                                        .setWithdrawAmount(req.getWithdrawAmount().intValue())
-                                        .setOperationKey("withdraw:" + withdraw.getWithdrawNo())
-                                        .build())
+                        return saldoPort
+                                .updateSaldoWithdraw(new SaldoPort.WithdrawUpdate(
+                                        saldo.cardNumber(),
+                                        newBalance,
+                                        withdraw.getWithdrawTime().toString(),
+                                        req.getWithdrawAmount().intValue(),
+                                        -req.getWithdrawAmount().intValue(),
+                                        0,
+                                        "withdraw:" + withdraw.getWithdrawNo()))
                                 .chain(v -> withdrawCommandRepository.persist(withdraw))
                                 .chain(savedWithdraw -> withdrawCommandRepository
                                         .updateStatus(savedWithdraw.getWithdrawId(), Status.SUCCESS.toString()))
@@ -293,40 +273,25 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
         logger.info("Starting update withdraw request: {}", req);
 
         return tracingMetrics.traceAndMeasure("updateWithdraw", "update", attrs, () -> {
-            return cardQueryService
-                    .findByCardNumber(
-                            pb.card.Card.FindByCardNumberRequest.newBuilder().setCardNumber(req.getCardNumber())
-                                    .build())
-                    .chain(cardResponse -> {
-                        if (cardResponse == null || !cardResponse.hasData()) {
-                            logger.error("Card not found with number={}", req.getCardNumber());
-                            throw new ResourceNotFoundException("Card not found");
-                        }
-                        return withdrawQueryRepository.findById(req.getWithdrawId());
-                    })
+            return cardPort
+                    .findCardByCardNumber(req.getCardNumber())
+                    .chain(card -> withdrawQueryRepository.findById(req.getWithdrawId()))
                     .chain(withdraw -> {
                         if (withdraw == null) {
                             logger.error("Withdraw not found with ID={}", req.getWithdrawId());
                             throw new ResourceNotFoundException("Withdraw not found");
                         }
-                        return saldoQueryService
-                                .findByCardNumber(pb.card.Card.FindByCardNumberRequest.newBuilder()
-                                        .setCardNumber(req.getCardNumber()).build())
-                                .chain(saldoResponse -> {
-                                    if (saldoResponse == null || !saldoResponse.hasData()) {
-                                        logger.error("Saldo not found for card number={}", req.getCardNumber());
-                                        throw new ResourceNotFoundException("Saldo not found");
-                                    }
-                                    pb.saldo.Saldo.SaldoResponse saldo = saldoResponse.getData();
-
+                        return saldoPort
+                                .findByCardNumber(req.getCardNumber())
+                                .chain(saldo -> {
                                     long amountDifference = req.getWithdrawAmount() - withdraw.getWithdrawAmount();
-                                    if (saldo.getTotalBalance() < amountDifference) {
+                                    if (saldo.totalBalance() < amountDifference) {
                                         logger.error("Insufficient balance for update. Balance={}, Needed={}",
-                                                saldo.getTotalBalance(), amountDifference);
+                                                saldo.totalBalance(), amountDifference);
                                         throw new IllegalStateException("Insufficient balance");
                                     }
 
-                                    int newBalance = saldo.getTotalBalance() - (int) amountDifference;
+                                    int newBalance = saldo.totalBalance() - (int) amountDifference;
 
                                     withdraw.setCardNumber(req.getCardNumber());
                                     withdraw.setWithdrawAmount(req.getWithdrawAmount().intValue());
@@ -335,16 +300,15 @@ public class WithdrawCommandServiceImpl implements WithdrawCommandService {
                                             : java.sql.Timestamp.valueOf(java.time.LocalDateTime.now()));
                                     withdraw.setUpdatedAt(java.sql.Timestamp.valueOf(java.time.LocalDateTime.now()));
 
-                                    return saldoCommandService
-                                            .updateSaldoWithdraw(
-                                                    pb.saldo.SaldoCommand.UpdateSaldoWithdrawRequest.newBuilder()
-                                                            .setCardNumber(saldo.getCardNumber())
-                                                            .setTotalBalance(newBalance)
-                                                            .setDeltaBalance(-((int) amountDifference))
-                                                            .setMinimumBalance(0)
-                                                            .setWithdrawTime(withdraw.getWithdrawTime().toString())
-                                                            .setWithdrawAmount(req.getWithdrawAmount().intValue())
-                                                            .build())
+                                    return saldoPort
+                                            .updateSaldoWithdraw(new SaldoPort.WithdrawUpdate(
+                                                    saldo.cardNumber(),
+                                                    newBalance,
+                                                    withdraw.getWithdrawTime().toString(),
+                                                    req.getWithdrawAmount().intValue(),
+                                                    -((int) amountDifference),
+                                                    0,
+                                                    null))
                                             .chain(v -> withdrawCommandRepository.persist(withdraw))
                                             .chain(savedWithdraw -> withdrawCommandRepository
                                                     .updateStatus(savedWithdraw.getWithdrawId(),

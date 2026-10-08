@@ -8,19 +8,18 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sanedge.common.adapter.saldo.SaldoPort;
 import com.sanedge.transfer.entity.Transfer;
 import com.sanedge.transfer.repository.TransferCommandRepository;
 import com.sanedge.transfer.repository.TransferQueryRepository;
 
 import io.quarkus.arc.Unremovable;
-import io.quarkus.grpc.GrpcClient;
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.Vertx;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import pb.saldo.SaldoCommandService;
 
 /**
  * Durable reconciliation worker for transfers. A transfer has up to two
@@ -45,8 +44,7 @@ public class TransferReconciliationWorker {
     TransferCommandRepository transferCommandRepository;
 
     @Inject
-    @GrpcClient("saldo")
-    SaldoCommandService saldoCommandService;
+    SaldoPort saldoPort;
 
     @ConfigProperty(name = "transfer.reconciliation.enabled", defaultValue = "true")
     boolean enabled;
@@ -151,22 +149,9 @@ public class TransferReconciliationWorker {
             return Uni.createFrom().item(true);
         }
         int reverseDelta = -delta;
-        return saldoCommandService.updateSaldoBalance(
-                pb.saldo.SaldoCommand.UpdateSaldoBalanceRequest.newBuilder()
-                        .setCardNumber(card)
-                        .setTotalBalance(0)
-                        .setDeltaBalance(reverseDelta)
-                        .setMinimumBalance(0)
-                        .setOperationKey("trf-comp:" + id + ":" + leg)
-                        .build())
-                .chain(resp -> {
-                    if (resp == null || !"success".equalsIgnoreCase(resp.getStatus())) {
-                        return failAndRelease(id, claimToken,
-                                resp == null ? "saldo service unavailable" : resp.getMessage())
-                                .map(v -> false);
-                    }
-                    return Uni.createFrom().item(true);
-                })
+        return saldoPort.updateSaldoBalance(new SaldoPort.BalanceUpdate(
+                card, 0, reverseDelta, 0, null, null, "trf-comp:" + id + ":" + leg))
+                .chain(resp -> Uni.createFrom().item(true))
                 .onFailure().recoverWithUni(err -> failAndRelease(id, claimToken,
                         "compensation adapter failed: " + err.getMessage()).map(v -> false));
     }

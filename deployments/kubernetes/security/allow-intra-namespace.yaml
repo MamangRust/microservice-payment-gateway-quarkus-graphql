@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: payment-gateway
+spec:
+  # Seluruh komunikasi runtime stack ini memang di dalam namespace yang sama:
+  # apigateway -> service gRPC, service -> pgbouncer/kafka/redis/clickhouse,
+  # prometheus -> exporter, otel-collector -> jaeger, nginx -> apigateway,
+  # plus initContainer `nc -z` yang menunggu dependency siap.
+  #
+  # Policy ini mengizinkan semua itu untuk semua pod. Policy per service di
+  # `services/<svc>/network-policy.yaml` bentuknya sama dan berfungsi sebagai
+  # titik pengetatan per service kalau nanti dependency-nya mau dipersempit.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payment-gateway
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: payment-gateway

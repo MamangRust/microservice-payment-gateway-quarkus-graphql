@@ -6,14 +6,12 @@ import org.slf4j.LoggerFactory;
 
 import com.sanedge.card.domain.requests.CreateCardRequest;
 import com.sanedge.card.domain.requests.UpdateCardRequest;
+import com.sanedge.common.adapter.user.UserPort;
 import com.sanedge.common.domain.response.ApiResponse;
 import com.sanedge.card.domain.response.CardResponse;
 import com.sanedge.card.domain.response.CardResponseDeleteAt;
 import com.sanedge.card.entity.Card;
 import com.sanedge.card.entity.Outbox;
-import pb.user.UserQueryService;
-import pb.user.User.FindByIdUserRequest;
-import io.quarkus.grpc.GrpcClient;
 import com.sanedge.card.service.KafkaService;
 import io.vertx.core.json.JsonObject;
 import com.sanedge.card.repository.CardCommandRepository;
@@ -44,8 +42,8 @@ public class CardCommandImplService implements CardCommandService {
     @Inject
     CardQueryRepository cardQueryRepository;
 
-    @GrpcClient("user")
-    UserQueryService userQueryService;
+    @Inject
+    UserPort userPort;
 
     @Inject
     KafkaService kafkaService;
@@ -97,13 +95,8 @@ public class CardCommandImplService implements CardCommandService {
         logger.info("Creating card for user_id={}", req.getUserId());
 
         return tracingMetrics.traceAndMeasure("createCard", "create_card", attrs, () -> {
-            return userQueryService.findById(FindByIdUserRequest.newBuilder().setId(req.getUserId().intValue()).build())
-                    .chain(response -> {
-                        if (response == null || !response.hasData()) {
-                            logger.error("User with id {} not found", req.getUserId());
-                            throw new IllegalArgumentException("User not found");
-                        }
-
+            return userPort.findById(req.getUserId().intValue())
+                    .chain(user -> {
                         Card card = new Card();
                         try {
                             String cardNumber = CardNumberGenerator.randomCardNumber();
@@ -141,7 +134,7 @@ public class CardCommandImplService implements CardCommandService {
         }).onFailure().recoverWithItem(e -> {
             logger.error("Failed to create card for user_id={}", req.getUserId(), e);
             String msg = "Failed to create card";
-            if (e instanceof IllegalArgumentException) {
+            if (e instanceof IllegalArgumentException || e instanceof ResourceNotFoundException) {
                 msg = e.getMessage();
             }
             return new ApiResponse<>("error", msg, null);
@@ -172,14 +165,8 @@ public class CardCommandImplService implements CardCommandService {
         logger.info("Updating card id={} for user_id={}", req.getCardId(), req.getUserId());
 
         return tracingMetrics.traceAndMeasure("updateCard", "update_card", attrs, () -> {
-            return userQueryService.findById(FindByIdUserRequest.newBuilder().setId(req.getUserId().intValue()).build())
-                    .chain(response -> {
-                        if (response == null || !response.hasData()) {
-                            logger.error("User with id {} not found", req.getUserId());
-                            throw new IllegalArgumentException("User not found");
-                        }
-                        return cardQueryRepository.findById(req.getCardId());
-                    })
+            return userPort.findById(req.getUserId().intValue())
+                    .chain(user -> cardQueryRepository.findById(req.getCardId()))
                     .chain(card -> {
                         if (card == null) {
                             logger.error("Card with id {} not found", req.getCardId());
@@ -201,7 +188,7 @@ public class CardCommandImplService implements CardCommandService {
         }).onFailure().recoverWithItem(e -> {
             logger.error("Failed to update card id={} for user_id={}", req.getCardId(), req.getUserId(), e);
             String msg = "Failed to update card";
-            if (e instanceof IllegalArgumentException) {
+            if (e instanceof IllegalArgumentException || e instanceof ResourceNotFoundException) {
                 msg = e.getMessage();
             }
             return new ApiResponse<>("error", msg, null);
